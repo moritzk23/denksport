@@ -319,7 +319,7 @@ const MODULES = {
 const NAMES=['Anna','Ben','Carla','David','Emma','Finn','Greta','Jonas'];
 const RELS=[{m:'älter',l:'jünger'},{m:'größer',l:'kleiner'},{m:'schneller',l:'langsamer'},
             {m:'stärker',l:'schwächer'},{m:'teurer',l:'billiger'}];
-const SHAPES=['●','▲','■','◆','★'];
+const SHAPE_SETS=[{f:'●',h:'○'},{f:'■',h:'□'},{f:'▲',h:'△'},{f:'★',h:'☆'},{f:'◆',h:'◇'}];
 
 function genMath(lv){
   const ops = lv<2 ? ['+','-'] : lv<4 ? ['+','-','×'] : ['+','-','×','÷'];
@@ -352,16 +352,45 @@ function genLogic(L){
   const concl=`${n[i]} ist ${useMore?rel.m:rel.l} als ${n[j]}.`;
   return {prem,concl,truth};
 }
+/* Form liegt auf der einen Achse, Anzahl auf der anderen: die Zeile verrät nur die
+   Form, die Spalte nur die Anzahl – eine einzelne Zeile/Spalte reicht nie aus. */
 function genMatrix(L){
-  const stepMax = L>=4 ? 2 : 1;
-  const shape=pick(SHAPES);
-  const a=rnd(1,2), rs=rnd(1,stepMax), cs=rnd(1,stepMax);
-  const grid=[]; for(let r=0;r<3;r++){ const row=[]; for(let c=0;c<3;c++) row.push(a+r*rs+c*cs); grid.push(row); }
-  const answer=grid[2][2];
-  const opts=new Set([answer]);
-  for(const o of shuffle([-3,-2,-1,1,2,3])){ const d=answer+o; if(d>=1) opts.add(d); if(opts.size>=4) break; }
-  let g=1; while(opts.size<4){ opts.add(answer+g); g++; }
-  return {shape, grid, answer, opts:shuffle([...opts])};
+  // Höheres Level: Formen dürfen aus derselben Familie stammen (● und ○) – schwerer zu unterscheiden
+  const glyphs = shuffle(L>=4 ? SHAPE_SETS.flatMap(s=>[s.f,s.h]) : SHAPE_SETS.map(s=>s.f)).slice(0,3);
+  const counts = shuffle(L>=4 ? [1,2,3,4,5,6] : [1,2,3,4]).slice(0,3);
+  const shapeByRow = Math.random()<0.5;          // Form mal auf Zeilen-, mal auf Spaltenachse
+
+  const mk=(s,n)=>({s,n});
+  const grid=[];
+  for(let r=0;r<3;r++){
+    const row=[];
+    for(let c=0;c<3;c++) row.push(mk(glyphs[shapeByRow?r:c], counts[shapeByRow?c:r]));
+    grid.push(row);
+  }
+
+  const aS=glyphs[2], aN=counts[2];
+  const otherS=glyphs.slice(0,2), otherN=counts.slice(0,2);
+  const opts=[
+    mk(aS, aN),                                  // richtig
+    mk(pick(otherS), aN),                        // nur Form falsch
+    mk(aS, pick(otherN)),                        // nur Anzahl falsch
+    mk(pick(otherS), pick(otherN))               // beides falsch
+  ];
+  const answer=opts[0];
+  return {grid, answer, opts:shuffle(opts)};
+}
+function matrixHtml(m){
+  let cells='';
+  for(let r=0;r<3;r++)for(let c=0;c<3;c++){
+    const cell=m.grid[r][c];
+    cells += (r===2&&c===2) ? `<div class="mcell q">?</div>` : `<div class="mcell">${cell.s.repeat(cell.n)}</div>`;
+  }
+  return `<div class="matrix">${cells}</div>
+    <div class="mopts">${m.opts.map((o,i)=>`<div class="mopt" data-i="${i}">${o.s.repeat(o.n)}</div>`).join('')}</div>`;
+}
+function matrixIsCorrect(m, btn){ return m.opts[+btn.dataset.i]===m.answer; }
+function matrixMarkAnswer(m){
+  document.querySelectorAll('.mopt').forEach(b=>{ if(m.opts[+b.dataset.i]===m.answer) b.classList.add('correct'); });
 }
 
 /* ---------------- Spieler-XP & Level ---------------- */
@@ -665,24 +694,17 @@ SCREENS.matrix = function(){
   function render(){
     setHud(`${idx+1}/${TOTAL} · Lvl ${L}`);
     cur=genMatrix(L); answered=false;
-    let cells='';
-    for(let r=0;r<3;r++)for(let c=0;c<3;c++){
-      cells += (r===2&&c===2) ? `<div class="mcell q">?</div>`
-                              : `<div class="mcell">${cur.shape.repeat(cur.grid[r][c])}</div>`;
-    }
     document.getElementById('body').innerHTML=`
       <p class="muted center">Welches Feld vervollständigt das Muster?</p>
-      <div class="matrix">${cells}</div>
-      <div class="mopts">${cur.opts.map(o=>`<div class="mopt" data-v="${o}">${cur.shape.repeat(o)}</div>`).join('')}</div>
+      ${matrixHtml(cur)}
       <div class="feedback" id="fb"></div>`;
     document.querySelectorAll('.mopt').forEach(b=>b.onclick=()=>choose(b));
   }
   function choose(btn){
     if(answered)return; answered=true;
-    if(+btn.dataset.v===cur.answer){ btn.classList.add('correct'); correct++; fxCorrect(); document.getElementById('fb').textContent='✔ Richtig'; }
-    else { btn.classList.add('wrong'); fxWrong();
-      document.querySelectorAll('.mopt').forEach(b=>{ if(+b.dataset.v===cur.answer) b.classList.add('correct'); });
-      document.getElementById('fb').textContent='✗ Achte auf Zeilen- & Spaltenregel'; }
+    if(matrixIsCorrect(cur, btn)){ btn.classList.add('correct'); correct++; fxCorrect(); document.getElementById('fb').textContent='✔ Richtig'; }
+    else { btn.classList.add('wrong'); fxWrong(); matrixMarkAnswer(cur);
+      document.getElementById('fb').textContent='✗ Form aus der Zeile, Anzahl aus der Spalte'; }
     idx++; setTimeout(()=> idx<TOTAL?render():finish(), 1000);
   }
   function finish(){
@@ -832,19 +854,12 @@ SCREENS.flow = function(){
       document.querySelectorAll('.tf button').forEach(b=>b.onclick=()=>judge((b.dataset.v==='1')===c.truth, b));
     }
     function renderMatrix(c){
-      let cells='';
-      for(let r=0;r<3;r++)for(let col=0;col<3;col++){
-        cells += (r===2&&col===2) ? `<div class="mcell q">?</div>` : `<div class="mcell">${c.shape.repeat(c.grid[r][col])}</div>`;
-      }
-      body().innerHTML = `
-        <div class="matrix">${cells}</div>
-        <div class="mopts">${c.opts.map(o=>`<div class="mopt" data-v="${o}">${c.shape.repeat(o)}</div>`).join('')}</div>
-        <div class="feedback" id="fb"></div>`;
-      document.querySelectorAll('.mopt').forEach(b=>b.onclick=()=>judge(+b.dataset.v===c.answer, b));
+      body().innerHTML = `${matrixHtml(c)}<div class="feedback" id="fb"></div>`;
+      document.querySelectorAll('.mopt').forEach(b=>b.onclick=()=>judge(matrixIsCorrect(c,b), b));
     }
     function markCorrect(){
       if(curType==='math'||curType==='seq') document.querySelectorAll('.ans').forEach(b=>{ if(+b.dataset.v===cur.ans || +b.dataset.v===cur.next) b.classList.add('correct'); });
-      else if(curType==='matrix') document.querySelectorAll('.mopt').forEach(b=>{ if(+b.dataset.v===cur.answer) b.classList.add('correct'); });
+      else if(curType==='matrix') matrixMarkAnswer(cur);
     }
     function judge(correct, btn){
       if(answered) return; answered=true; count++;
