@@ -85,6 +85,8 @@
   .feedback{height:22px; font-weight:700; text-align:center; margin-top:6px;}
   .chartrow{display:flex; align-items:flex-end; gap:6px; height:120px; margin-top:8px;}
   .chartrow > div{flex:1; background:var(--acc); border-radius:6px 6px 0 0; min-height:3px;}
+  .chartlbl{display:flex; gap:6px; margin-top:4px;}
+  .chartlbl > span{flex:1; text-align:center; font-size:10px; color:var(--muted);}
   .hidden{display:none;}
   .levelbar{height:6px; background:var(--card2); border-radius:99px; overflow:hidden; margin-top:12px;}
   .levelbar > i{display:block; height:100%; background:var(--acc); width:0;}
@@ -173,15 +175,20 @@ let state = Object.assign({
   level:{},             // pro Modul dauerhaftes Level 1..10 (nur im 'grow'-Modus)
   sound:true,           // Sound-Effekte an/aus
   theme:'graphit',      // Design: 'graphit' | 'papier' | 'tinte' | 'sepia'
-  xp:0                  // Spieler-Erfahrungspunkte (globaler Fortschritt)
+  xp:0,                 // Spieler-Erfahrungspunkte (globaler Fortschritt)
+  v:2                   // Schema-Version (v1-Verlaufseinträge haben keine Genauigkeit)
 }, DB.load());
+state.v = 2;
 if(typeof state.level!=='object' || !state.level) state.level={};
 
 const MAXLVL = 10;
 const DIFF_FIXED = { easy:2, medium:5, hard:8 };
 const DIFF_LABEL = { grow:'Mitwachsend', easy:'Leicht', medium:'Mittel', hard:'Schwer' };
 
-function todayStr(){ return new Date().toISOString().slice(0,10); }
+/* Lokales Datum, nicht UTC – sonst zählt eine Session nach Mitternacht auf den Vortag */
+function todayStr(d=new Date()){
+  return new Date(d.getTime() - d.getTimezoneOffset()*60000).toISOString().slice(0,10);
+}
 function persist(){ DB.save(state); }
 
 /* ---------------- Themes & Icons ---------------- */
@@ -225,11 +232,13 @@ function growByAccuracy(mod, lvl, correct, total){
   saveLevel(mod, lvl + (acc>=0.8 ? 1 : acc<0.5 ? -1 : 0));
 }
 
-function registerSession(module, score){
+/* stats: {correct, total, secs, level} bzw. {span} bei Zahlen merken.
+   Der Score bleibt Spielwertung; vergleichbar über Sessions hinweg ist nur acc bei gleichem Level. */
+function registerSession(module, score, stats){
   const t = todayStr();
   // Streak-Logik
   if(state.lastDay !== t){
-    const y = new Date(Date.now()-86400000).toISOString().slice(0,10);
+    const y = todayStr(new Date(Date.now()-86400000));
     state.streak = (state.lastDay === y) ? state.streak+1 : 1;
     state.lastDay = t;
   }
@@ -239,8 +248,15 @@ function registerSession(module, score){
   // Bestwert
   if(!state.best[module] || score > state.best[module]) state.best[module] = score;
   // Verlauf
-  state.history.push({day:t, module, score});
-  if(state.history.length > 60) state.history.shift();
+  const e = {day:t, module, score};
+  if(stats){
+    if(stats.total>0) e.acc = Math.round(stats.correct/stats.total*100);
+    if(stats.secs)  e.secs = stats.secs;
+    if(stats.level) e.lvl  = stats.level;
+    if(stats.span)  e.span = stats.span;
+  }
+  state.history.push(e);
+  if(state.history.length > 200) state.history.shift();
   persist();
 }
 
@@ -332,25 +348,34 @@ function genMath(lv){
   else { ans=rnd(2,3+lv); b=rnd(2,3+lv); a=ans*b; q=`${a} ÷ ${b}`; }
   return {q, ans};
 }
+/* Weite Wertebereiche sind hier kein Selbstzweck: Der Aufgabenvorrat ist Start × Parameter.
+   Zu enge Bereiche machen die Reihen nach wenigen Sessions wiedererkennbar statt denkbar. */
 function genSeq(level){
-  const type = Math.floor(Math.random()* (level<2?2: level<4?3:4));
-  let arr=[], next, start=rnd(1,9);
-  if(type===0){ const d=rnd(2,3+level); arr=[start]; for(let i=0;i<4;i++)arr.push(arr[i]+d); next=arr[4]+d; }
-  else if(type===1){ const r=2; arr=[start]; for(let i=0;i<4;i++)arr.push(arr[i]*r); next=arr[4]*r; }
-  else if(type===2){ arr=[start]; let d=rnd(2,4); for(let i=0;i<4;i++){arr.push(arr[i]+d); d++;} next=arr[4]+d; }
-  else { arr=[1,1]; for(let i=0;i<3;i++)arr.push(arr[arr.length-1]+arr[arr.length-2]); next=arr[4]+arr[3]; }
-  return {arr:arr.slice(0,5), next};
+  const types = level<2 ? 2 : level<4 ? 3 : level<6 ? 4 : 5;
+  const type = Math.floor(Math.random()*types);
+  let arr=[], next, start=rnd(1,20);
+  if(type===0){ const d=rnd(2,4+level); arr=[start]; for(let i=0;i<4;i++)arr.push(arr[i]+d); next=arr[4]+d; }
+  else if(type===1){ const r=rnd(2,3); start=(r===3)?rnd(1,6):rnd(1,15); arr=[start]; for(let i=0;i<4;i++)arr.push(arr[i]*r); next=arr[4]*r; }
+  else if(type===2){ start=rnd(1,15); arr=[start]; let d=rnd(2,6); for(let i=0;i<4;i++){arr.push(arr[i]+d); d++;} next=arr[4]+d; }
+  else if(type===3){ arr=[rnd(1,9), rnd(2,12)]; for(let i=0;i<3;i++)arr.push(arr[arr.length-1]+arr[arr.length-2]); next=arr[4]+arr[3]; }
+  else { const c=rnd(1,5); start=rnd(1,6); arr=[start]; for(let i=0;i<4;i++)arr.push(arr[i]*2+c); next=arr[4]*2+c; }
+  return {arr:arr.slice(0,5), next, type};
 }
+/* Die Prämissen werden gemischt ausgegeben. Stünden sie in Kettenreihenfolge, wäre die
+   Antwort allein aus der Lesereihenfolge ablesbar – ohne transitives Schließen. */
 function genLogic(L){
   const people = L<=2 ? 3 : L<=5 ? 4 : 5;
-  const n=shuffle(NAMES).slice(0,people);
+  const n=shuffle(NAMES).slice(0,people);       // n[0] hat die höchste Ausprägung
   const rel=pick(RELS);
-  const prem=[]; for(let k=0;k<people-1;k++) prem.push(`${n[k]} ist ${rel.m} als ${n[k+1]}.`);
+  const pairs=[]; for(let k=0;k<people-1;k++) pairs.push([n[k], n[k+1]]);
+  const shown=shuffle(pairs);
+  const prem=shown.map(([a,b])=>`${a} ist ${rel.m} als ${b}.`);
   let i=rnd(0,people-1), j=rnd(0,people-1); while(j===i) j=rnd(0,people-1);
   const useMore=Math.random()<0.5;
   const truth=(useMore===(i<j));
   const concl=`${n[i]} ist ${useMore?rel.m:rel.l} als ${n[j]}.`;
-  return {prem,concl,truth};
+  // premPairs/conclPair nur für den Selbsttest – die Oberfläche nutzt nur prem/concl
+  return {prem, concl, truth, premPairs:shown, conclPair:[n[i], n[j]], conclMore:useMore};
 }
 /* Form liegt auf der einen Achse, Anzahl auf der anderen: die Zeile verrät nur die
    Form, die Spalte nur die Anzahl – eine einzelne Zeile/Spalte reicht nie aus. */
@@ -551,7 +576,7 @@ SCREENS.math = function(){
     const score = correct*10 + Math.max(0, level*5) - secs;
     const sc = Math.max(0, score);
     saveLevel('math', level);
-    registerSession('math', sc);
+    registerSession('math', sc, {correct, total:TOTAL, secs, level});
     resultScreen('🧮 Kopfrechnen', correct, TOTAL, sc, secs, 'math', '', levelInfo('math', L0));
   }
   render();
@@ -586,7 +611,7 @@ SCREENS.seq = function(){
     const secs=Math.round((Date.now()-startAll)/1000);
     const sc=Math.max(0, correct*15 + level*4 - Math.floor(secs/2));
     saveLevel('seq', level);
-    registerSession('seq', sc);
+    registerSession('seq', sc, {correct, total:TOTAL, secs, level});
     resultScreen('🔢 Zahlenreihen', correct, TOTAL, sc, secs, 'seq', '', levelInfo('seq', L0));
   }
   render();
@@ -639,7 +664,7 @@ SCREENS.memory = function(){
       if(lives<=0){
         const sc=best*20 + (round-1)*3;
         saveLevel('memory', Math.max(D0, best-2));   // Level wächst mit erreichter Länge
-        registerSession('memory', sc);
+        registerSession('memory', sc, {span:best});
         setTimeout(()=>resultScreen('🧠 Zahlen merken', best, best, sc, 0, 'memory', `Beste Länge: ${best} Ziffern`, levelInfo('memory', D0)), 900);
       }else setTimeout(newRound, 900);
     }
@@ -679,7 +704,7 @@ SCREENS.logic = function(){
     const secs=Math.round((Date.now()-startAll)/1000);
     const sc=Math.max(0, correct*18 - Math.floor(secs/3));
     growByAccuracy('logic', L, correct, TOTAL);
-    registerSession('logic', sc);
+    registerSession('logic', sc, {correct, total:TOTAL, secs, level:L});
     resultScreen('🤔 Logik-Schlüsse', correct, TOTAL, sc, secs, 'logic', '', levelInfo('logic', L));
   }
   render();
@@ -711,7 +736,7 @@ SCREENS.matrix = function(){
     const secs=Math.round((Date.now()-startAll)/1000);
     const sc=Math.max(0, correct*16 - Math.floor(secs/3));
     growByAccuracy('matrix', L, correct, TOTAL);
-    registerSession('matrix', sc);
+    registerSession('matrix', sc, {correct, total:TOTAL, secs, level:L});
     resultScreen('🧩 Muster-Matrix', correct, TOTAL, sc, secs, 'matrix', '', levelInfo('matrix', L));
   }
   render();
@@ -769,7 +794,7 @@ SCREENS.nback = function(){
     function finish(){
       const sc=Math.max(0, hits*18 - fa*10 - misses*4);
       growByAccuracy('nback', L, hits, targets);
-      registerSession('nback', sc);
+      registerSession('nback', sc, {correct:hits, total:targets, level:L});
       resultScreen('🎯 N-Back', hits, targets, sc, 0, 'nback', `${N}-Back · Fehlalarme: ${fa} · Verpasst: ${misses}`, levelInfo('nback', L));
     }
     step();
@@ -801,7 +826,8 @@ SCREENS.flow = function(){
   document.getElementById('flowstart').onclick=run;
 
   function run(){
-    let lives=3, score=0, combo=0, bestCombo=0, count=0, answered=false, cur=null, curType=null;
+    let lives=3, score=0, combo=0, bestCombo=0, count=0, right=0, answered=false, cur=null, curType=null;
+    const startAll=Date.now();
     const body = () => document.getElementById('flowbody');
 
     app.innerHTML = `
@@ -864,7 +890,7 @@ SCREENS.flow = function(){
     function judge(correct, btn){
       if(answered) return; answered=true; count++;
       if(correct){
-        combo++; bestCombo=Math.max(bestCombo,combo);
+        right++; combo++; bestCombo=Math.max(bestCombo,combo);
         const pts = 10 + combo*2;
         score += pts; fxCorrect(); floatXP('+'+pts, btn);
         if(btn) btn.classList.add('correct');
@@ -880,7 +906,7 @@ SCREENS.flow = function(){
     }
     function end(){
       const isBest = score>(state.best.flow||0);
-      registerSession('flow', score);
+      registerSession('flow', score, {correct:right, total:count, secs:Math.round((Date.now()-startAll)/1000)});
       const xpRes = gainXP(Math.round(score*0.8));
       app.innerHTML = `
         <div class="center" style="padding-top:26px;">
@@ -950,36 +976,94 @@ function resultScreen(title, correct, total, score, secs, module, extra, lvl){
 
 /* ---------------- Statistik ---------------- */
 SCREENS.stats = function(){
-  const last = state.history.slice(-14);
-  const maxS = Math.max(1, ...last.map(h=>h.score));
+  /* Diagramm zeigt Trefferquote, nicht den Score: die Score-Formeln der Module sind
+     untereinander nicht vergleichbar. Das Level steht unter jedem Balken, denn eine
+     Quote ist nur bei gleichem Level aussagekräftig. */
+  const acc = state.history.filter(h=>typeof h.acc==='number').slice(-14);
   const byModule = {};
-  state.history.forEach(h=>{ byModule[h.module]=(byModule[h.module]||{n:0,sum:0}); byModule[h.module].n++; byModule[h.module].sum+=h.score; });
+  state.history.forEach(h=>{
+    const m = byModule[h.module] = byModule[h.module] || {n:0, accSum:0, accN:0, secSum:0, secN:0, span:0};
+    m.n++;
+    if(typeof h.acc==='number'){ m.accSum+=h.acc; m.accN++; }
+    if(typeof h.secs==='number'){ m.secSum+=h.secs; m.secN++; }
+    if(typeof h.span==='number') m.span=Math.max(m.span, h.span);
+  });
   app.innerHTML = `
     <h2 class="shead" style="margin-top:6px;"><span class="hicon">${svgIcon('stats',22)}</span>Statistik</h2>
     ${xpBar()}
     <div class="spacer"></div>
     <div class="card">
-      <div class="muted" style="font-size:13px;">Punkte der letzten ${last.length} Sessions</div>
-      <div class="chartrow">
-        ${last.length? last.map(h=>`<div style="height:${Math.round(h.score/maxS*100)}%" title="${h.score}"></div>`).join('')
-          : '<div class="muted" style="align-self:center;">Noch keine Daten – leg los!</div>'}
-      </div>
+      <div class="muted" style="font-size:13px;">Trefferquote der letzten ${acc.length} Sessions</div>
+      ${acc.length ? `
+        <div class="chartrow">${acc.map(h=>
+          `<div style="height:${Math.max(3,h.acc)}%" title="${h.acc}%${h.lvl?' auf Level '+h.lvl:''}"></div>`).join('')}</div>
+        <div class="chartlbl">${acc.map(h=>`<span>${h.lvl||'·'}</span>`).join('')}</div>
+        <div class="muted" style="font-size:11px; margin-top:6px;">Zahl unter dem Balken = Level. Eine Quote ist nur bei gleichem Level vergleichbar.</div>`
+        : `<div class="chartrow"><div class="muted" style="align-self:center; background:none;">Noch keine Daten – leg los!</div></div>`}
     </div>
     <div class="spacer"></div>
     ${Object.entries(byModule).map(([k,v])=>{
       const name = MODULES[k]?MODULES[k].name:(k==='flow'?'Flow':k);
       const ic = MODULES[k]?MODULES[k].icon:(k==='flow'?'flow':'stats');
-      return `<div class="card" style="margin-bottom:10px; display:flex; justify-content:space-between; align-items:center;">
-        <div style="display:flex; align-items:center; gap:10px;"><span class="hicon">${svgIcon(ic,20)}</span>
-          <div><div style="font-weight:700;">${name}</div>
-          <div class="muted" style="font-size:13px;">${v.n} Sessions · ⌀ ${Math.round(v.sum/v.n)} Pkt</div></div></div>
-        <div style="font-size:22px; font-weight:800; color:var(--acc)">${state.best[k]||0}</div>
+      const bits = [v.n+(v.n===1?' Session':' Sessions')];
+      if(v.accN) bits.push('⌀ '+Math.round(v.accSum/v.accN)+'% richtig');
+      if(v.span) bits.push('max. '+v.span+' Ziffern');
+      if(v.secN) bits.push('⌀ '+Math.round(v.secSum/v.secN)+'s');
+      return `<div class="card" style="margin-bottom:10px; display:flex; justify-content:space-between; align-items:center; gap:10px;">
+        <div style="display:flex; align-items:center; gap:10px; min-width:0;"><span class="hicon">${svgIcon(ic,20)}</span>
+          <div style="min-width:0;"><div style="font-weight:700;">${name}</div>
+          <div class="muted" style="font-size:12px;">${bits.join(' · ')}</div></div></div>
+        <div style="text-align:right; flex:none;">
+          <div style="font-size:20px; font-weight:800; color:var(--acc)">${state.best[k]||0}</div>
+          <div class="muted" style="font-size:11px;">Bestwert</div>
+        </div>
       </div>`;}).join('') || '<p class="muted">Noch keine Trainingsdaten vorhanden.</p>'}
     <div class="spacer"></div>
-    <button class="btn ghost" onclick="if(confirm('Wirklich alle Daten löschen?')){localStorage.removeItem('denksport'); location.reload();}">Fortschritt zurücksetzen</button>
+    <div class="card">
+      <div style="font-weight:700; margin-bottom:4px;">Daten sichern</div>
+      <p class="muted" style="font-size:12px; margin:0 0 12px;">Der Fortschritt liegt nur auf diesem Gerät. Safari kann ihn löschen – exportiere ihn gelegentlich.</p>
+      <div class="row">
+        <button class="btn ghost" style="flex:1;" onclick="exportData()">Exportieren</button>
+        <button class="btn ghost" style="flex:1;" onclick="document.getElementById('impf').click()">Importieren</button>
+      </div>
+      <input type="file" id="impf" accept="application/json,.json" style="display:none" onchange="importData(this)">
+    </div>
+    <div class="spacer"></div>
+    <button class="btn ghost" onclick="if(confirm('Wirklich alle Daten löschen? Das kann nicht rückgängig gemacht werden.')){localStorage.removeItem('denksport'); location.reload();}">Fortschritt zurücksetzen</button>
     ${navBar('stats')}
   `;
 };
+
+/* ---------------- Datensicherung ---------------- */
+function exportData(){
+  const blob = new Blob([JSON.stringify(state,null,2)], {type:'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'denksport-'+todayStr()+'.json';
+  document.body.appendChild(a); a.click();
+  setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  toast('Datei wird gesichert');
+}
+function importData(input){
+  const file = input.files && input.files[0];
+  input.value = '';                                  // erneuter Import derselben Datei möglich
+  if(!file) return;
+  const rd = new FileReader();
+  rd.onload = () => {
+    let data;
+    try{ data = JSON.parse(rd.result); }
+    catch(e){ alert('Das ist keine gültige Denksport-Datei.'); return; }
+    if(!data || typeof data!=='object' || !('xp' in data) || !Array.isArray(data.history)){
+      alert('Die Datei enthält keine Denksport-Daten.'); return;
+    }
+    const p = playerLevel(data.xp||0);
+    if(!confirm(`Import überschreibt deinen aktuellen Fortschritt.\n\nDatei: Level ${p.level}, ${data.history.length} Sessions, Streak ${data.streak||0}.\n\nFortfahren?`)) return;
+    DB.save(data);
+    location.reload();
+  };
+  rd.onerror = () => alert('Datei konnte nicht gelesen werden.');
+  rd.readAsText(file);
+}
 
 /* ---------------- Helfer ---------------- */
 function rnd(a,b){ return Math.floor(Math.random()*(b-a+1))+a; }
@@ -992,12 +1076,16 @@ function distractors(correct){
     if(d!==correct && d>=0) set.add(d);
     if(set.size<4 && d<0) set.add(Math.abs(correct)+set.size);
   }
-  return [...set].sort(()=>Math.random()-0.5);
+  return shuffle([...set]);   // kein sort(()=>Math.random()-0.5): das mischt nachweislich ungleich
 }
 
 /* Start */
 applyTheme();
-go('home');
+if(new URLSearchParams(location.search).has('selftest')){
+  const s=document.createElement('script'); s.src='./selftest.js'; document.body.appendChild(s);
+}else{
+  go('home');
+}
 
 /* Service Worker registrieren (Offline-Betrieb) – nur über http(s), nicht file:// */
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
