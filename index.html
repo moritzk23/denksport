@@ -140,7 +140,9 @@
   .mopt:active{transform:scale(.95);}
   .mopt.correct{background:var(--good); color:var(--on-good);} .mopt.wrong{background:var(--bad); color:var(--on-bad);}
   /* N-Back */
-  .nb-letter{font-size:96px; font-weight:800; text-align:center; margin:26px 0; min-height:110px;}
+  .nb-letter{font-size:96px; font-weight:800; text-align:center; margin:26px 0; height:110px; line-height:110px;}
+  .nb-letter.pop{animation:nbpop .22s ease-out;}
+  @keyframes nbpop{ from{ transform:scale(.82); opacity:.25; } to{ transform:scale(1); opacity:1; } }
   .nb-hit{width:100%; padding:22px; font-size:20px; font-weight:800; border:0; border-radius:14px;
           color:var(--on-acc); background:var(--acc); cursor:pointer;}
   .nb-hit:active{transform:scale(.98);} .nb-hit.flash{background:var(--good); color:var(--on-good);}
@@ -718,19 +720,29 @@ SCREENS.nback = function(){
     }
     const targets=seq.filter((c,k)=>k>=N && c===seq[k-N]).length || 1;
     const body=document.getElementById('body');
-    let i=-1, pressed=false, hits=0, misses=0, fa=0;
-    function show(){
+    const GAP = 380;                               // Leerpause: trennt zwei gleiche Buchstaben sichtbar
+    const SHOW = Math.max(750, ISI - GAP);
+    let i=0, pressed=false, hits=0, misses=0, fa=0;
+
+    body.innerHTML = `<div class="nb-letter" id="nbl"></div><button class="nb-hit" id="hit">Treffer</button>`;
+    const letterEl = document.getElementById('nbl');
+    const hitBtn = document.getElementById('hit');
+    hitBtn.onclick = function(){
+      if(!pressed){ pressed=true; this.classList.add('flash'); Sound.beep(520,0.06,'sine',0,0.1); buzz(10); }
+    };
+
+    function step(){
       setHud(`${i+1}/${LEN} · ${N}-Back`);
-      body.innerHTML=`<div class="nb-letter">${seq[i]}</div><button class="nb-hit" id="hit">Treffer</button>`;
-      pressed=false;
-      document.getElementById('hit').onclick=function(){
-        if(!pressed){ pressed=true; this.classList.add('flash'); Sound.beep(520,0.06,'sine',0,0.1); buzz(10); }
-      };
-      setTimeout(advance, ISI);
-    }
-    function advance(){
-      if(i>=N){ const t=(seq[i]===seq[i-N]); if(t){ pressed?hits++:misses++; } else if(pressed){ fa++; } }
-      i++; if(i>=LEN) finish(); else show();
+      pressed=false; hitBtn.classList.remove('flash');
+      letterEl.textContent = seq[i];
+      letterEl.classList.remove('pop'); void letterEl.offsetWidth; letterEl.classList.add('pop');
+      setTimeout(()=>{
+        letterEl.textContent='';                   // Buchstabe aus -> Pause
+        setTimeout(()=>{                           // Antwortfenster endet mit der Pause
+          if(i>=N){ const t=(seq[i]===seq[i-N]); if(t){ pressed?hits++:misses++; } else if(pressed){ fa++; } }
+          i++; if(i>=LEN) finish(); else step();
+        }, GAP);
+      }, SHOW);
     }
     function finish(){
       const sc=Math.max(0, hits*18 - fa*10 - misses*4);
@@ -738,7 +750,7 @@ SCREENS.nback = function(){
       registerSession('nback', sc);
       resultScreen('🎯 N-Back', hits, targets, sc, 0, 'nback', `${N}-Back · Fehlalarme: ${fa} · Verpasst: ${misses}`, levelInfo('nback', L));
     }
-    advance();  // startet: i wird 0, dann show()
+    step();
   }
 };
 
@@ -905,7 +917,7 @@ function resultScreen(title, correct, total, score, secs, module, extra, lvl){
         ${lvlHtml}
         <div class="spacer"></div>
         <div class="row">
-          <div class="stat"><div class="big">${correct}/${total}</div><div class="lbl">${extra?'':'Richtig'}</div></div>
+          <div class="stat"><div class="big">${correct}/${total}</div><div class="lbl">${module==='nback'?'Treffer':module==='memory'?'Länge':'Richtig'}</div></div>
           ${secs?`<div class="stat"><div class="big">${secs}s</div><div class="lbl">Zeit</div></div>`:''}
           <div class="stat"><div class="big">${state.best[module]||score}</div><div class="lbl">Bestwert</div></div>
         </div>
