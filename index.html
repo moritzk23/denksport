@@ -337,15 +337,24 @@ const RELS=[{m:'älter',l:'jünger'},{m:'größer',l:'kleiner'},{m:'schneller',l
             {m:'stärker',l:'schwächer'},{m:'teurer',l:'billiger'}];
 const SHAPE_SETS=[{f:'●',h:'○'},{f:'■',h:'□'},{f:'▲',h:'△'},{f:'★',h:'☆'},{f:'◆',h:'◇'}];
 
+/* Die Faktoren wachsen über die Levels vom kleinen Einmaleins bis zweistellig × zweistellig.
+   Vorher endete Level 10 bei 13 × 13 – dort, wo Kopfrechnen erst anfängt, etwas zu bringen. */
+function mulFactors(lv){
+  if(lv<=3) return [rnd(2,3+lv), rnd(2,3+lv)];      // kleines Einmaleins
+  if(lv<=6) return [rnd(2,12),   rnd(2,12)];        // volles Einmaleins
+  if(lv<=8) return [rnd(11,29),  rnd(2,9)];         // zweistellig × einstellig
+  return       [rnd(11,29),  rnd(11,19)];           // zweistellig × zweistellig
+}
 function genMath(lv){
   const ops = lv<2 ? ['+','-'] : lv<4 ? ['+','-','×'] : ['+','-','×','÷'];
   const op = ops[Math.floor(Math.random()*ops.length)];
-  const max = 5 + lv*4;
+  const max = 8 + lv*10;
   let a=rnd(2,max), b=rnd(2,max), q, ans;
   if(op==='+'){ ans=a+b; q=`${a} + ${b}`; }
   else if(op==='-'){ if(b>a)[a,b]=[b,a]; ans=a-b; q=`${a} − ${b}`; }
-  else if(op==='×'){ a=rnd(2,3+lv); b=rnd(2,3+lv); ans=a*b; q=`${a} × ${b}`; }
-  else { ans=rnd(2,3+lv); b=rnd(2,3+lv); a=ans*b; q=`${a} ÷ ${b}`; }
+  else if(op==='×'){ [a,b]=mulFactors(lv); ans=a*b; q=`${a} × ${b}`; }
+  else { let [x,y]=mulFactors(lv); if(y>12) y=rnd(3,12);   // Teiler bleibt handhabbar
+         ans=x; b=y; a=x*y; q=`${a} ÷ ${b}`; }
   return {q, ans};
 }
 /* Weite Wertebereiche sind hier kein Selbstzweck: Der Aufgabenvorrat ist Start × Parameter.
@@ -416,6 +425,45 @@ function matrixHtml(m){
 function matrixIsCorrect(m, btn){ return m.opts[+btn.dataset.i]===m.answer; }
 function matrixMarkAnswer(m){
   document.querySelectorAll('.mopt').forEach(b=>{ if(m.opts[+b.dataset.i]===m.answer) b.classList.add('correct'); });
+}
+
+/* N-Back-Folge mit Lockvögeln: Wiederholungen im Abstand N-1 bzw. N+1, die KEINE Treffer sind.
+   Ohne sie genügt das Gefühl "der kam doch gerade schon vor" – man müsste die Position nie mitzählen.
+   Nicht-Treffer werden zusätzlich so gewählt, dass sie nicht zufällig zum Treffer oder Lockvogel werden. */
+const NB_POOL=['C','H','K','L','Q','R','S','T'];
+function genNBack(N, len){
+  const seq=[];
+  const lureDists = k => [N-1, N+1].filter(d=>d>=1 && d!==N && k-d>=0);
+  for(let k=0;k<len;k++){
+    const canTarget = k>=N;
+    const lures = lureDists(k);
+    const r = Math.random();
+    let ch = null;
+    if(canTarget && r<0.30){
+      ch = seq[k-N];                                       // echter Treffer
+    }else if(lures.length && r<0.52){
+      const cand = seq[k-pick(lures)];
+      if(!canTarget || cand!==seq[k-N]) ch = cand;         // Lockvogel, aber kein Treffer
+    }
+    if(ch===null){                                         // klarer Nicht-Treffer
+      const tabu = new Set();
+      if(canTarget) tabu.add(seq[k-N]);
+      for(const d of lures) tabu.add(seq[k-d]);
+      const frei = NB_POOL.filter(c=>!tabu.has(c));
+      ch = pick(frei.length?frei:NB_POOL);
+    }
+    seq.push(ch);
+  }
+  const isTarget = (c,k) => k>=N && c===seq[k-N];
+  let targets = seq.filter(isTarget).length;
+  if(targets===0 && len>N){                                // ein Lauf ohne Treffer wäre nicht auswertbar
+    const k = rnd(N, len-1);
+    seq[k] = seq[k-N];
+    targets = seq.filter(isTarget).length;
+  }
+  const lureCount = seq.filter((c,k)=>
+    !isTarget(c,k) && lureDists(k).some(d=>c===seq[k-d])).length;
+  return {seq, targets, lures:lureCount, N};
 }
 
 /* ---------------- Spieler-XP & Level ---------------- */
@@ -748,7 +796,6 @@ SCREENS.nback = function(){
   const N   = L<=2 ? 1 : L<=6 ? 2 : 3;            // Level steuert die Gedächtnistiefe
   const ISI = Math.max(1600, 2800 - L*110);       // höheres Level = schnelleres Tempo
   const LEN = 14 + Math.min(10, L);               // höheres Level = mehr Durchgänge
-  const pool=['C','H','K','L','Q','R','S','T'];
   sessionShell('nback');
   document.getElementById('body').innerHTML=`
     <div class="card">
@@ -760,12 +807,7 @@ SCREENS.nback = function(){
   document.getElementById('startnb').onclick=run;
 
   function run(){
-    const seq=[];
-    for(let k=0;k<LEN;k++){
-      if(k>=N && Math.random()<0.33) seq.push(seq[k-N]);   // erzwungener Treffer
-      else seq.push(pick(pool));
-    }
-    const targets=seq.filter((c,k)=>k>=N && c===seq[k-N]).length || 1;
+    const {seq, targets} = genNBack(N, LEN);
     const body=document.getElementById('body');
     const GAP = 380;                               // Leerpause: trennt zwei gleiche Buchstaben sichtbar
     const SHOW = Math.max(750, ISI - GAP);
@@ -1069,13 +1111,18 @@ function importData(input){
 function rnd(a,b){ return Math.floor(Math.random()*(b-a+1))+a; }
 function pick(a){ return a[Math.floor(Math.random()*a.length)]; }
 function shuffle(a){ a=[...a]; for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; }
+/* Der Abstand wächst mit der Wurzel des Ergebnisses, nicht proportional: Bei 551 lägen
+   ±30 % so weit auseinander, dass Schätzen genügt – bei 8 wären ±30 % dagegen zu eng. */
 function distractors(correct){
+  const spread = Math.max(2, Math.round(Math.sqrt(Math.abs(correct))*1.5));
   const set=new Set([correct]);
-  while(set.size<4){
-    let d = correct + rnd(-Math.max(3,Math.abs(correct)*0.3|0), Math.max(3,Math.abs(correct)*0.3|0));
+  let guard=0;
+  while(set.size<4 && guard++<300){
+    const d = correct + rnd(-spread, spread);
     if(d!==correct && d>=0) set.add(d);
-    if(set.size<4 && d<0) set.add(Math.abs(correct)+set.size);
   }
+  let extra=1;
+  while(set.size<4){ set.add(Math.abs(correct)+extra); extra++; }   // Sicherheitsnetz
   return shuffle([...set]);   // kein sort(()=>Math.random()-0.5): das mischt nachweislich ungleich
 }
 

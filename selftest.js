@@ -54,6 +54,60 @@
     return {ok:bad===0, info:bad===0?('8000 Aufgaben korrekt, Operatoren: '+[...seen].join(' ')):bad+' falsche Ergebnisse'};
   });
 
+  check('genMath: Schwierigkeit wächst bis Level 10 spürbar', ()=>{
+    const maxProd = lv => {
+      let m=0;
+      for(let t=0;t<4000;t++){
+        const q=genMath(lv).q, x=q.match(/^(\d+) × (\d+)$/);
+        if(x) m=Math.max(m, +x[1] * +x[2]);
+      }
+      return m;
+    };
+    const l4=maxProd(4), l10=maxProd(10);
+    return {ok: l10>=400 && l10>l4*2,
+            info:'größtes Produkt – Level 4: '+l4+', Level 10: '+l10+' (vorher war bei 169 Schluss)'};
+  });
+  check('distractors: Ablenker liegen nah genug am Ergebnis', ()=>{
+    let worst=0;
+    for(const correct of [8, 24, 169, 551]){
+      for(let t=0;t<500;t++){
+        const o=distractors(correct).filter(x=>x!==correct);
+        worst=Math.max(worst, ...o.map(x=>Math.abs(x-correct)/Math.max(1,correct)));
+      }
+    }
+    return {ok: worst<=0.60, info:'größter relativer Abstand '+pct(worst)};
+  });
+
+  /* ---------- genNBack(): Lockvögel statt bloßem Wiedererkennen ---------- */
+  check('genNBack: jeder Lauf hat Treffer, Rate im sinnvollen Bereich', ()=>{
+    let leer=0, rateSum=0, n=0;
+    for(const N of [1,2,3]) for(let t=0;t<600;t++){
+      const g=genNBack(N, 18); n++;
+      if(g.targets===0) leer++;
+      rateSum += g.targets/(18-N);
+    }
+    const rate=rateSum/n;
+    return {ok: leer===0 && rate>0.15 && rate<0.45,
+            info:'Trefferrate '+pct(rate)+', Läufe ohne Treffer: '+leer};
+  });
+  check('genNBack: Lockvögel vorhanden (Abstand N±1, aber kein Treffer)', ()=>{
+    let lureSum=0, n=0;
+    for(const N of [1,2,3]) for(let t=0;t<600;t++){
+      const g=genNBack(N, 18); lureSum += g.lures/18; n++;
+    }
+    const r=lureSum/n;
+    return {ok: r>0.08, info:'Lockvogel-Anteil '+pct(r)+' – ohne sie genügt bloßes Wiedererkennen'};
+  });
+  check('genNBack: gemeldete Trefferzahl stimmt mit der Folge überein', ()=>{
+    let bad=0;
+    for(const N of [1,2,3]) for(let t=0;t<600;t++){
+      const g=genNBack(N,18);
+      const nachgezaehlt=g.seq.filter((c,k)=>k>=N && c===g.seq[k-N]).length;
+      if(nachgezaehlt!==g.targets || g.seq.length!==18) bad++;
+    }
+    return {ok: bad===0, info:bad===0?'1800 Läufe konsistent':bad+' Abweichungen'};
+  });
+
   /* ---------- genSeq(): Regel erfüllt + nicht auswendig lernbar ---------- */
   check('genSeq: Fortsetzung folgt der jeweiligen Regel', ()=>{
     let bad=0;
