@@ -131,7 +131,8 @@
   .fcombo{height:24px; text-align:center; font-weight:800; color:var(--acc); font-size:16px; opacity:0; transition:opacity .2s;}
   .fcombo.show{opacity:1;}
   .prompt.small{font-size:30px;}
-  .prompt.text{font-size:22px; line-height:1.45; font-weight:700; margin:20px 0;}
+  .prompt.text{font-size:21px; line-height:1.45; font-weight:700; margin:20px 0 10px;}
+  .einheit{text-align:center; font-size:12px; color:var(--muted); margin:0 0 14px;}
   .floatxp{position:fixed; transform:translate(-50%,0); color:var(--good); font-weight:800; font-size:20px;
            pointer-events:none; z-index:9998; transition:transform .7s ease-out, opacity .7s; opacity:1;}
   .floatxp.go{transform:translate(-50%,-46px); opacity:0;}
@@ -234,6 +235,7 @@ function reviewMiss(mod, item){
   const ex = list.find(r => r.q === item.q);
   if(ex){ ex.step = 0; ex.due = addDays(todayStr(), REVIEW_STEPS[0]); }
   else list.push({q:item.q, ans:item.ans, cls:item.cls||'', hinweis:item.hinweis||'',
+                  einheit:item.einheit||'', opts:item.opts||null,
                   step:0, due:addDays(todayStr(), REVIEW_STEPS[0])});
   if(list.length > 150) list.shift();
   persist();
@@ -438,18 +440,73 @@ function genDreisatz(lv){
           ans:c*unit, kind:'dreisatz', cls:'text',
           hinweis:`Ein Stück kostet ${a*unit} ÷ ${a} = ${unit} €, also kosten ${c} Stück ${c*unit} €.`};
 }
+/* ---- Finanz-Kopfrechnen ----
+   Alltagsgrößen aus dem Asset Management. Die Ablenker sind jeweils der Fehler, den man
+   an dieser Stelle tatsächlich macht – Zehnerpotenz vertan, Prozent mit Basispunkt
+   verwechselt, symmetrisch gedacht, ungewichtet gemittelt. */
+function genBpBetrag(lv){
+  const bp  = pick([5,10,15,20,25,30,40,50,75,100]);
+  const vol = 50*rnd(2, lv<8?12:24);                       // 100–600 bzw. 100–1200 Mio
+  const ans = Math.round(vol*bp/10000*1000)/1000;
+  return {kind:'bp_betrag', cls:'text', einheit:'Mio €',
+    q:`Ein Fonds verwaltet ${num(vol)} Mio €.<br>Wie viel sind ${bp} Basispunkte davon?`,
+    ans, opts:viereOptionen(ans, [vol*bp/100, vol*bp/1000, vol*bp/100000]),
+    hinweis:`Ein Basispunkt ist 0,01 %. ${num(vol)} × ${bp} ÷ 10.000 = ${num(ans)} Mio €.`};
+}
+function genBetragBp(lv){
+  const bp  = pick([10,15,20,25,30,40,50,60,75,90]);
+  const vol = 50*rnd(2, 20);
+  const geb = Math.round(vol*bp/10000*1000)/1000;
+  return {kind:'betrag_bp', cls:'text', einheit:'bp',
+    q:`Ein Fonds verwaltet ${num(vol)} Mio € und nimmt ${num(geb)} Mio € Gebühren ein.<br>Wie viel ist das in Basispunkten?`,
+    ans:bp, opts:viereOptionen(bp, [bp/100, bp*10, bp/10]),
+    // Über den Prozentwert erklären: Der reine Quotient (0,0025) wäre gerundet irreführend.
+    hinweis:`${num(geb)} von ${num(vol)} Mio sind ${num(geb/vol*100)} % – und ${num(geb/vol*100)} % sind ${bp} bp.`};
+}
+function genProzentUmkehr(lv){
+  const p = pick([10,20,25,50,60,75,80]);
+  const ans = Math.round(p/(100-p)*100);
+  return {kind:'prozent_umkehr', cls:'text', einheit:'%',
+    q:`Ein Kurs fällt um ${p} %.<br>Um wie viel Prozent muss er steigen, um den Ausgangswert wieder zu erreichen?`,
+    ans, opts:viereOptionen(ans, [p, 100-p, p*2]),
+    hinweis:`Von 100 auf ${100-p} gefallen. Zurück auf 100 heißt ${100-p} × ${num(1+ans/100)}, also rund ${ans} % Anstieg.`};
+}
+function genRegel72(lv){
+  const p = pick([2,3,4,6,8,9,12]);
+  const ans = Math.round(72/p);
+  return {kind:'regel72', cls:'text', einheit:'Jahre',
+    q:`Ein Vermögen wächst mit ${p} % pro Jahr.<br>Wie lange dauert die Verdopplung ungefähr?`,
+    ans, opts:viereOptionen(ans, [Math.round(100/p), Math.round(ans/2), ans*2]),
+    hinweis:`Faustregel: 72 ÷ ${p} ≈ ${ans} Jahre.`};
+}
+function genGewichtet(lv){
+  const w1 = 10*rnd(2,8), w2 = 100-w1;                     // Gewichte in Zehnerschritten
+  const r1 = rnd(4,14), r2 = rnd(1,4);
+  const ans = Math.round((w1*r1 + w2*r2)/100*100)/100;
+  return {kind:'gewichtet', cls:'text', einheit:'%',
+    q:`Ein Depot besteht zu ${w1} % aus Aktien (Rendite ${r1} %) und zu ${w2} % aus Anleihen (Rendite ${r2} %).<br>Wie hoch ist die Gesamtrendite?`,
+    ans, opts:viereOptionen(ans, [(r1+r2)/2, r1+r2, (w2*r1 + w1*r2)/100]),
+    hinweis:`${num(w1/100)} × ${r1} % + ${num(w2/100)} × ${r2} % = ${num(ans)} %.`};
+}
+
 function genMath(lv){
   const extra = [];
-  if(lv>=4) extra.push(genPercent);
-  if(lv>=6) extra.push(genDreisatz);
-  if(extra.length && Math.random()>=0.55) return pick(extra)(lv);
+  if(lv>=4) extra.push(genPercent, genBpBetrag);
+  if(lv>=5) extra.push(genRegel72);
+  if(lv>=6) extra.push(genDreisatz, genProzentUmkehr);
+  if(lv>=7) extra.push(genBetragBp);
+  if(lv>=8) extra.push(genGewichtet);
+  /* Auf höheren Stufen überwiegt die Anwendung, unten bleibt es reines Rechnen. */
+  const arithAnteil = lv>=6 ? 0.45 : 0.6;
+  if(extra.length && Math.random()>=arithAnteil) return pick(extra)(lv);
 
   const ops = lv<2 ? ['+','-'] : lv<4 ? ['+','-','×'] : ['+','-','×','÷'];
   const op = ops[Math.floor(Math.random()*ops.length)];
   const max = 8 + lv*10;
   let a=rnd(2,max), b=rnd(2,max), q, ans;
   if(op==='+'){ ans=a+b; q=`${a} + ${b}`; }
-  else if(op==='-'){ if(b>a)[a,b]=[b,a]; ans=a-b; q=`${a} − ${b}`; }
+  else if(op==='-'){ while(b===a) b=rnd(2,max);          // sonst entstehen Aufgaben wie „14 − 14"
+                     if(b>a)[a,b]=[b,a]; ans=a-b; q=`${a} − ${b}`; }
   else if(op==='×'){ [a,b]=mulFactors(lv); ans=a*b; q=`${a} × ${b}`; }
   else { let [x,y]=mulFactors(lv); if(y>12) y=rnd(3,12);   // Teiler bleibt handhabbar
          ans=x; b=y; a=x*y; q=`${a} ÷ ${b}`; }
@@ -556,8 +613,23 @@ const TABLE_THEMES = [
 ];
 /* Deutsche Zahlschreibweise, höchstens zwei Nachkommastellen */
 function num(x){
-  const g = Math.round(x*100)/100;
-  return (Number.isInteger(g) ? String(g) : g.toFixed(2).replace(/0$/,'')).replace('.', ',');
+  const g = Math.round(x*1000)/1000;
+  return (Number.isInteger(g) ? String(g) : String(+g.toFixed(3))).replace('.', ',');
+}
+/* Vier verschiedene, positive Antwortmöglichkeiten: zuerst die übergebenen Denkfallen,
+   danach notfalls neutrale Auffüller im Abstand von rund 12 % der Lösung. */
+function viereOptionen(ans, fallen){
+  const opts=[], gesehen=new Set();
+  const merke = v => {
+    if(!Number.isFinite(v) || v<=0) return;
+    const r=Math.round(v*1000)/1000, k=r.toFixed(3);
+    if(!gesehen.has(k)){ gesehen.add(k); opts.push(r); }
+  };
+  merke(ans);
+  fallen.forEach(merke);
+  const schritt = Math.max(0.1, Math.round(Math.abs(ans)*0.12*10)/10) || 1;
+  for(let n=1; opts.length<4 && n<200; n++){ merke(ans+schritt*n); merke(ans-schritt*n); }
+  return shuffle(opts.slice(0,4));
 }
 function genTable(L){
   const th = pick(TABLE_THEMES);
@@ -638,25 +710,9 @@ function genTable(L){
     erklaerung = `${num(werteSp[i1])} × ${num(p)} ÷ 100 = ${num(ans)}.`;
   }
 
-  /* Vier verschiedene Optionen: Bezugsfehler zuerst, dann notfalls neutrale Auffüller */
-  const opts=[]; const gesehen=new Set();
-  for(const v of roh){
-    if(!Number.isFinite(v) || v<=0) continue;      // Null und Negatives taugen nicht als Option
-    const k=v.toFixed(2);
-    if(!gesehen.has(k)){ gesehen.add(k); opts.push(v); }
-  }
-  let d=1;
-  while(opts.length<4){
-    for(const kand of [ans+d, ans-d]){
-      if(opts.length>=4) break;
-      const g=Math.round(kand*100)/100, k=g.toFixed(2);
-      if(g>0 && !gesehen.has(k)){ gesehen.add(k); opts.push(g); }
-    }
-    d++;
-  }
   return {kind, titel:th.titel, zeilenLabel:th.zeilenLabel,
           kopf:th.spalten.map(s=>s.kopf), zeilen, frage, ans,
-          opts:shuffle(opts.slice(0,4)), erklaerung};
+          opts:viereOptionen(ans, roh.slice(1)), erklaerung};
 }
 
 /* Bedingte Wahrscheinlichkeit in natürlichen Häufigkeiten ("9 von 108") statt in Prozent.
@@ -784,7 +840,7 @@ SCREENS.home = function(){
   const goalPct = Math.min(100, Math.round(state.todayCount/state.goal*100));
   app.innerHTML = `
     <h1>Denksport</h1>
-    <p class="sub">Dein tägliches Training für Mathe, Logik & Gedächtnis</p>
+    <p class="sub">Zahlen, Logik und Konzentration – für Auswahlverfahren und Alltag</p>
 
     ${xpBar()}
 
@@ -883,12 +939,14 @@ SCREENS.math = function(){
     if(isReview) reviewDone++;
     answered=false;
     setHud(`${idx+1}/${TOTAL} · Level ${L0}`);
-    const opts = distractors(current.ans);
+    // Finanzaufgaben liefern eigene Optionen mit; sonst die generischen Ablenker
+    const opts = current.opts || distractors(current.ans);
     document.getElementById('body').innerHTML = `
       ${isReview?'<div class="revtag">Wiederholung</div>':''}
       <div class="prompt ${current.cls||''}">${current.q}</div>
+      ${current.einheit?`<div class="einheit">Antwort in ${current.einheit}</div>`:''}
       <div class="answers">
-        ${opts.map(o=>`<button class="ans" data-v="${o}">${o}</button>`).join('')}
+        ${opts.map(o=>`<button class="ans" data-v="${o}">${num(o)}</button>`).join('')}
       </div>
       <div class="feedback" id="fb"></div>
       <div class="bar"><i style="width:${idx/TOTAL*100}%"></i></div>
@@ -899,16 +957,17 @@ SCREENS.math = function(){
     if(answered) return; answered=true;
     let erklaert=false;        // längere Pause, wenn ein Rechenweg zu lesen ist
     const v = +btn.dataset.v;
-    if(v===current.ans){
+    if(Math.abs(v - current.ans) < 1e-9){      // Toleranz wegen Nachkommastellen
       btn.classList.add('correct'); correct++; fxCorrect();
       document.getElementById('fb').textContent='✔ Richtig';
       if(isReview) reviewHit('math', current.q);
     }else{
       btn.classList.add('wrong'); fxWrong();
-      document.querySelectorAll('.ans').forEach(b=>{ if(+b.dataset.v===current.ans) b.classList.add('correct'); });
-      // Bei Prozent und Dreisatz den Rechenweg zeigen, nicht nur die Lösung
+      document.querySelectorAll('.ans').forEach(b=>{
+        if(Math.abs(+b.dataset.v - current.ans) < 1e-9) b.classList.add('correct'); });
+      // Bei den angewandten Aufgaben den Rechenweg zeigen, nicht nur die Lösung
       document.getElementById('fb').textContent = current.hinweis ? '✗ '+current.hinweis
-                                                                 : '✗ Falsch: '+current.ans;
+                                                                 : '✗ Falsch: '+num(current.ans);
       erklaert = !!current.hinweis;
       reviewMiss('math', current);
     }

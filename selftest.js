@@ -9,6 +9,7 @@
     catch(e){ results.push({name, ok:false, info:'Ausnahme: '+e.message}); }
   }
   const pct = x => (x*100).toFixed(1)+'%';
+  const zahl = s => parseFloat(String(s).replace(',', '.'));   // deutsche Schreibweise einlesen
   /* Gleichverteilung: maximale relative Abweichung vom Erwartungswert */
   function uniformity(counts){
     const n=counts.reduce((a,b)=>a+b,0), exp=n/counts.length;
@@ -60,11 +61,56 @@
         if(!m){ bad++; continue; }
         const a=+m[1], b=+m[2], c=+m[3];
         exp=(b%a===0) ? b/a*c : NaN;
+      }else if(kind==='bp_betrag'){
+        m=q.match(/verwaltet ([\d,]+)\s*Mio\s*€\.<br>Wie viel sind (\d+) Basispunkte/);
+        if(!m){ bad++; continue; }
+        exp=Math.round(zahl(m[1])*(+m[2])/10000*1000)/1000;
+      }else if(kind==='betrag_bp'){
+        m=q.match(/verwaltet ([\d,]+)\s*Mio\s*€ und nimmt ([\d,]+)\s*Mio/);
+        if(!m){ bad++; continue; }
+        exp=Math.round(zahl(m[2])/zahl(m[1])*10000);
+      }else if(kind==='prozent_umkehr'){
+        m=q.match(/fällt um (\d+) %/);
+        if(!m){ bad++; continue; }
+        exp=Math.round((+m[1])/(100-(+m[1]))*100);
+      }else if(kind==='regel72'){
+        m=q.match(/wächst mit (\d+) % pro Jahr/);
+        if(!m){ bad++; continue; }
+        exp=Math.round(72/(+m[1]));
+      }else if(kind==='gewichtet'){
+        m=q.match(/zu (\d+) % aus Aktien \(Rendite (\d+) %\) und zu (\d+) % aus Anleihen \(Rendite (\d+) %\)/);
+        if(!m){ bad++; continue; }
+        exp=Math.round(((+m[1])*(+m[2]) + (+m[3])*(+m[4]))/100*100)/100;
       }else{ bad++; continue; }
-      if(exp!==ans || !Number.isInteger(ans) || ans<0) bad++;
+      // Finanzaufgaben haben Nachkommastellen – daher Toleranz statt Gleichheit
+      if(!Number.isFinite(ans) || ans<=0 || Math.abs(exp-ans)>0.001) bad++;
     }
     const namen=Object.entries(arten).map(([k,v])=>k+' '+pct(v/8000)).join(', ');
     return {ok:bad===0, info:bad===0?('8000 Aufgaben korrekt – '+namen):bad+' falsche Ergebnisse'};
+  });
+  check('genMath: Finanzaufgaben liefern vier saubere Optionen mit Einheit', ()=>{
+    const finanz=new Set(['bp_betrag','betrag_bp','prozent_umkehr','regel72','gewichtet']);
+    let bad=0, gesehen=0;
+    for(const L of LEVELS) for(let t=0;t<600;t++){
+      const g=genMath(L);
+      if(!finanz.has(g.kind)) continue;
+      gesehen++;
+      const k=g.opts ? g.opts.map(o=>o.toFixed(3)) : [];
+      if(!g.opts || g.opts.length!==4 || new Set(k).size!==4) bad++;
+      else if(!g.opts.some(o=>Math.abs(o-g.ans)<1e-9)) bad++;
+      else if(g.opts.some(o=>!Number.isFinite(o)||o<=0)) bad++;
+      else if(!g.einheit || !g.hinweis) bad++;
+    }
+    return {ok:bad===0 && gesehen>500,
+            info:bad===0?(gesehen+' Finanzaufgaben geprüft'):bad+' fehlerhaft von '+gesehen};
+  });
+  check('genMath: Finanzaufgaben erscheinen ab ihrem Level', ()=>{
+    const arten = lv => { const s=new Set(); for(let t=0;t<3000;t++) s.add(genMath(lv).kind); return s; };
+    const l3=arten(3), l5=arten(5), l10=arten(10);
+    const ok = !l3.has('bp_betrag') && !l3.has('regel72')
+            &&  l5.has('bp_betrag') &&  l5.has('regel72') && !l5.has('gewichtet') && !l5.has('betrag_bp')
+            &&  l10.has('betrag_bp') && l10.has('gewichtet') && l10.has('prozent_umkehr');
+    return {ok, info:'Level 3: '+[...l3].join('/')+' · Level 5: '+[...l5].join('/')+' · Level 10: '+[...l10].join('/')};
   });
   check('genMath: Prozent und Dreisatz erscheinen ab ihrem Level', ()=>{
     const kinds = lv => { const s=new Set(); for(let t=0;t<600;t++) s.add(genMath(lv).kind); return s; };
