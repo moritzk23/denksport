@@ -92,6 +92,16 @@
   .levelbar{height:6px; background:var(--card2); border-radius:99px; overflow:hidden; margin-top:12px;}
   .levelbar > i{display:block; height:100%; background:var(--acc); width:0;}
   .levellbl{font-size:11px; color:var(--muted); margin-top:5px;}
+  /* Datenanalyse */
+  .tzeit{height:5px; background:var(--card2); border-radius:99px; overflow:hidden; margin:2px 0 14px;}
+  .tzeit > i{display:block; height:100%; width:100%; background:var(--acc);}
+  .tcap{font-size:12px; color:var(--muted); margin-bottom:6px;}
+  .tscroll{overflow-x:auto; -webkit-overflow-scrolling:touch;}
+  .dtab{width:100%; border-collapse:collapse; font-size:14px; font-variant-numeric:tabular-nums;}
+  .dtab th,.dtab td{padding:8px 10px; border-bottom:1px solid var(--line); text-align:right; white-space:nowrap;}
+  .dtab th:first-child,.dtab td:first-child{text-align:left;}
+  .dtab th{font-size:11px; color:var(--muted); font-weight:600; text-transform:none;}
+  .tfrage{font-size:16px; font-weight:700; line-height:1.4; margin:16px 0 12px;}
   .card.note{background:none; border-style:dashed; color:var(--muted);}
   .revtag{display:inline-block; font-size:11px; font-weight:700; letter-spacing:.4px;
           color:var(--acc); border:1px solid var(--acc); border-radius:999px; padding:3px 10px; margin-bottom:-6px;}
@@ -258,7 +268,8 @@ const ICONS = {
   stats:'<line x1="4" y1="20" x2="20" y2="20"/><line x1="7" y1="20" x2="7" y2="13"/><line x1="12" y1="20" x2="12" y2="7"/><line x1="17" y1="20" x2="17" y2="15"/>',
   home:'<path d="M4 11l8-7 8 7"/><path d="M6 10v9a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-9"/>',
   flow:'<path d="M13 3L5 13h5l-1 8 8-11h-5l1-7z"/>',
-  heart:'<path d="M12 20s-7-4.5-9.2-8.5C1.2 8.5 2.6 5 6 5c2 0 3.2 1.3 4 2.5C10.8 6.3 12 5 14 5c3.4 0 4.8 3.5 3.2 6.5C19 15.5 12 20 12 20z"/>'
+  heart:'<path d="M12 20s-7-4.5-9.2-8.5C1.2 8.5 2.6 5 6 5c2 0 3.2 1.3 4 2.5C10.8 6.3 12 5 14 5c3.4 0 4.8 3.5 3.2 6.5C19 15.5 12 20 12 20z"/>',
+  table:'<rect x="3" y="4" width="18" height="16" rx="2"/><line x1="3" y1="9.5" x2="21" y2="9.5"/><line x1="10" y1="9.5" x2="10" y2="20"/>'
 };
 function svgIcon(name, size){
   return `<svg class="ic" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICONS[name]||''}</svg>`;
@@ -385,14 +396,18 @@ function confetti(){
 function levelInfo(mod, from){ return state.mode==='grow' ? {from, to: shownLevel(mod)} : null; }
 
 /* ---------------- Module-Definitionen ---------------- */
+/* group steuert die Einordnung auf der Startseite: 'finance' zahlt auf Bewerbung und
+   Praktikum ein, 'allgemein' ist Konzentrations- und Gedächtnistraining. */
 const MODULES = {
-  math:  {icon:'math',   name:'Kopfrechnen',   desc:'Rechnen auf Zeit, wird adaptiv schwerer'},
-  seq:   {icon:'seq',    name:'Zahlenreihen',  desc:'Erkenne das Muster und setze fort'},
-  memory:{icon:'memory', name:'Zahlen merken', desc:'Merke dir immer längere Ziffernfolgen'},
-  logic: {icon:'logic',  name:'Logik-Schlüsse',desc:'Wahr oder falsch? Logisch schließen'},
-  matrix:{icon:'matrix', name:'Muster-Matrix', desc:'Erkenne die Regel im 3×3-Raster'},
-  nback: {icon:'nback',  name:'N-Back',        desc:'Konzentration über eine Folge halten'},
+  table: {icon:'table',  name:'Datenanalyse',  desc:'Zahlen aus Tabellen richtig beziehen', group:'finance'},
+  math:  {icon:'math',   name:'Kopfrechnen',   desc:'Rechnen auf Zeit, wird adaptiv schwerer', group:'finance'},
+  matrix:{icon:'matrix', name:'Muster-Matrix', desc:'Erkenne die Regel im 3×3-Raster', group:'finance'},
+  seq:   {icon:'seq',    name:'Zahlenreihen',  desc:'Erkenne das Muster und setze fort', group:'finance'},
+  logic: {icon:'logic',  name:'Logik-Schlüsse',desc:'Schlüssig folgern, auch mit Wahrscheinlichkeiten', group:'finance'},
+  memory:{icon:'memory', name:'Zahlen merken', desc:'Merke dir immer längere Ziffernfolgen', group:'allgemein'},
+  nback: {icon:'nback',  name:'N-Back',        desc:'Konzentration über eine Folge halten', group:'allgemein'},
 };
+const GRUPPEN = [['finance','Bewerbung & Finance'], ['allgemein','Gedächtnis & Konzentration']];
 
 /* ---------------- Aufgaben-Generatoren (von Modulen & Flow genutzt) ---------------- */
 const NAMES=['Anna','Ben','Carla','David','Emma','Finn','Greta','Jonas'];
@@ -519,6 +534,129 @@ function matrixHtml(m){
 function matrixIsCorrect(m, btn){ return m.opts[+btn.dataset.i]===m.answer; }
 function matrixMarkAnswer(m){
   document.querySelectorAll('.mopt').forEach(b=>{ if(m.opts[+b.dataset.i]===m.answer) b.classList.add('correct'); });
+}
+
+/* Zahlen aus einer Tabelle lesen und beziehen – das Kernformat der Eignungstests im
+   Finanzsektor (Aon/cut-e „scales numerical"). Der Trainingswert steckt in den Ablenkern:
+   Sie sind keine Zufallszahlen, sondern die typischen Bezugsfehler. Wer die Tabelle richtig
+   liest, aber falsch bezieht, landet auf einer Option statt danebenzuraten. */
+const TABLE_THEMES = [
+  {titel:'Fondsvolumen zum Jahresende', zeilenLabel:'Fonds',
+   zeilen:['Alpha','Beta','Gamma','Delta','Epsilon'],
+   spalten:[{kopf:'Volumen (Mio €)', min:6, max:90, faktor:10},
+            {kopf:'Kunden (Tsd.)',   min:4, max:60, faktor:1}]},
+  {titel:'Geschäftszahlen', zeilenLabel:'Jahr',
+   zeilen:['2021','2022','2023','2024','2025'],
+   spalten:[{kopf:'Umsatz (Mio €)', min:12, max:80, faktor:10},
+            {kopf:'Kosten (Mio €)', min:5,  max:40, faktor:10}]},
+  {titel:'Vermögen nach Region', zeilenLabel:'Region',
+   zeilen:['Europa','Nordamerika','Asien','Sonstige'],
+   spalten:[{kopf:'Volumen (Mio €)', min:8, max:70, faktor:10},
+            {kopf:'Mandate',         min:6, max:45, faktor:1}]}
+];
+/* Deutsche Zahlschreibweise, höchstens zwei Nachkommastellen */
+function num(x){
+  const g = Math.round(x*100)/100;
+  return (Number.isInteger(g) ? String(g) : g.toFixed(2).replace(/0$/,'')).replace('.', ',');
+}
+function genTable(L){
+  const th = pick(TABLE_THEMES);
+  const anz = L<=2 ? 3 : L<=5 ? 4 : th.zeilen.length;
+  const zeilenNamen = th.zeilen.slice(0, anz);
+  /* Werte je Spalte paarweise verschieden – sonst ergeben Differenz und Verhältnis
+     entartete Aufgaben (Unterschied null, Vielfaches genau eins). */
+  const werte = zeilenNamen.map(()=> th.spalten.map(()=>0));
+  th.spalten.forEach((s,ci)=>{
+    const gesehen=new Set();
+    zeilenNamen.forEach((_,ri)=>{
+      let v, schutz=0;
+      do{ v = rnd(s.min, s.max)*s.faktor; }while(gesehen.has(v) && schutz++<80);
+      gesehen.add(v); werte[ri][ci]=v;
+    });
+  });
+  const zeilen = zeilenNamen.map((label,i)=>({label, werte:werte[i]}));
+
+  const arten = ['anteil','differenz'];
+  if(L>=3) arten.push('veraenderung');
+  if(L>=6) arten.push('verhaeltnis','prozentVon');
+  const kind = pick(arten);
+
+  const sp = rnd(0, th.spalten.length-1);                  // betrachtete Spalte
+  const spalte = th.spalten[sp].kopf;
+  const werteSp = zeilen.map(z=>z.werte[sp]);
+  const summe = werteSp.reduce((a,b)=>a+b,0);
+  const idx = shuffle(zeilen.map((_,i)=>i));
+  const [i1, i2, i3] = idx;                                // drei verschiedene Zeilen
+
+  let frage, ans, roh, erklaerung;
+  if(kind==='anteil'){
+    frage = `Welchen Anteil an der Spalte „${spalte}“ hat ${zeilen[i1].label}?`;
+    ans = Math.round(werteSp[i1]/summe*100);
+    roh = [ans,
+           Math.round(werteSp[i1]/(summe-werteSp[i1])*100),      // Summe ohne den Wert selbst
+           Math.round(werteSp[i2]/summe*100),                    // falsche Zeile
+           Math.round(werteSp[i1]/Math.max(...werteSp)*100)];    // Anteil am größten statt an der Summe
+    erklaerung = `${num(werteSp[i1])} von insgesamt ${num(summe)} sind ${ans} %.`;
+  }else if(kind==='differenz'){
+    const [a,b] = werteSp[i1]>=werteSp[i2] ? [i1,i2] : [i2,i1];
+    frage = `Wie groß ist der Unterschied zwischen ${zeilen[a].label} und ${zeilen[b].label} in „${spalte}“?`;
+    ans = werteSp[a]-werteSp[b];
+    roh = [ans,
+           werteSp[a]+werteSp[b],                                // addiert statt subtrahiert
+           Math.abs(werteSp[a]-werteSp[i3]),                     // falsche Zeile
+           Math.round((werteSp[a]-werteSp[b])/werteSp[b]*100)];  // relativ statt absolut
+    erklaerung = `${num(werteSp[a])} − ${num(werteSp[b])} = ${num(ans)}.`;
+  }else if(kind==='veraenderung'){
+    /* Immer die größere Zeile als Bezugsziel: Die Aufgabe soll den Bezugsfehler trainieren,
+       nicht zusätzlich das Vorzeichen. */
+    const [hi,lo] = werteSp[i1]>=werteSp[i2] ? [i1,i2] : [i2,i1];
+    const alt = werteSp[lo], neu = werteSp[hi];
+    frage = `Um wie viel Prozent liegt ${zeilen[hi].label} über ${zeilen[lo].label} in „${spalte}“?`;
+    ans = Math.round((neu-alt)/alt*100);
+    roh = [ans,
+           Math.round((neu-alt)/neu*100),                        // Bezug auf den neuen statt den alten Wert
+           neu-alt,                                              // absolut statt relativ
+           Math.round(neu/alt*100)];                             // Verhältnis statt Veränderung
+    erklaerung = `(${num(neu)} − ${num(alt)}) ÷ ${num(alt)} = ${ans} %.`;
+  }else if(kind==='verhaeltnis'){
+    const [a,b] = werteSp[i1]>=werteSp[i2] ? [i1,i2] : [i2,i1];
+    frage = `Wie viele Male so groß ist ${zeilen[a].label} wie ${zeilen[b].label} in „${spalte}“?`;
+    ans = Math.round(werteSp[a]/werteSp[b]*10)/10;
+    roh = [ans,
+           Math.round(werteSp[b]/werteSp[a]*10)/10,              // Verhältnis umgedreht
+           Math.round(werteSp[a]/werteSp[i3]*10)/10,             // falsche Zeile
+           Math.round((werteSp[a]-werteSp[b])/werteSp[b]*10)/10];// Zuwachs statt Vielfaches
+    erklaerung = `${num(werteSp[a])} ÷ ${num(werteSp[b])} = ${num(ans)}.`;
+  }else{
+    const p = pick([0.5, 0.75, 1, 1.5, 2]);
+    frage = `Wie hoch ist eine Gebühr von ${num(p)} % auf ${zeilen[i1].label} in „${spalte}“?`;
+    ans = Math.round(werteSp[i1]*p/100*100)/100;
+    roh = [ans,
+           Math.round(werteSp[i1]*p*100)/100,                    // Faktor 100 daneben
+           Math.round(werteSp[i1]*p/1000*100)/100,               // Faktor 10 daneben
+           Math.round(werteSp[i2]*p/100*100)/100];               // falsche Zeile
+    erklaerung = `${num(werteSp[i1])} × ${num(p)} ÷ 100 = ${num(ans)}.`;
+  }
+
+  /* Vier verschiedene Optionen: Bezugsfehler zuerst, dann notfalls neutrale Auffüller */
+  const opts=[]; const gesehen=new Set();
+  for(const v of roh){
+    if(!Number.isFinite(v) || v<=0) continue;      // Null und Negatives taugen nicht als Option
+    const k=v.toFixed(2);
+    if(!gesehen.has(k)){ gesehen.add(k); opts.push(v); }
+  }
+  let d=1;
+  while(opts.length<4){
+    for(const kand of [ans+d, ans-d]){
+      if(opts.length>=4) break;
+      const g=Math.round(kand*100)/100, k=g.toFixed(2);
+      if(g>0 && !gesehen.has(k)){ gesehen.add(k); opts.push(g); }
+    }
+    d++;
+  }
+  return {kind, titel:th.titel, zeilenLabel:th.zeilenLabel,
+          kopf:th.spalten.map(s=>s.kopf), zeilen, frage, ans,
+          opts:shuffle(opts.slice(0,4)), erklaerung};
 }
 
 /* Bedingte Wahrscheinlichkeit in natürlichen Häufigkeiten ("9 von 108") statt in Prozent.
@@ -657,20 +795,21 @@ SCREENS.home = function(){
     </div>
     <div class="bar"><i style="width:${goalPct}%"></i></div>
 
-    <h2 style="margin-top:22px;">Training</h2>
-    <div class="grid">
-      ${Object.entries(MODULES).map(([k,m])=>`
-        <div class="card module" onclick="go('${k}')">
-          ${state.best[k]?`<div class="best">Best ${state.best[k]}</div>`:''}
-          <div class="micon">${svgIcon(m.icon,30)}</div>
-          <div class="name">${m.name}</div>
-          <div class="desc">${m.desc}</div>
-          ${state.mode==='grow'
-            ? `<div class="levelbar" title="Level ${shownLevel(k)} von ${MAXLVL}"><i style="width:${shownLevel(k)/MAXLVL*100}%"></i></div>
-               <div class="levellbl">Level ${shownLevel(k)}</div>`
-            : `<div class="levellbl">${DIFF_LABEL[state.mode]}</div>`}
-        </div>`).join('')}
-    </div>
+    ${GRUPPEN.map(([g,titel])=>`
+      <h2 style="margin-top:22px;">${titel}</h2>
+      <div class="grid">
+        ${Object.entries(MODULES).filter(([,m])=>m.group===g).map(([k,m])=>`
+          <div class="card module" onclick="go('${k}')">
+            ${state.best[k]?`<div class="best">Best ${state.best[k]}</div>`:''}
+            <div class="micon">${svgIcon(m.icon,30)}</div>
+            <div class="name">${m.name}</div>
+            <div class="desc">${m.desc}</div>
+            ${state.mode==='grow'
+              ? `<div class="levelbar" title="Level ${shownLevel(k)} von ${MAXLVL}"><i style="width:${shownLevel(k)/MAXLVL*100}%"></i></div>
+                 <div class="levellbl">Level ${shownLevel(k)}</div>`
+              : `<div class="levellbl">${DIFF_LABEL[state.mode]}</div>`}
+          </div>`).join('')}
+      </div>`).join('')}
 
     <div class="spacer"></div>
     <div class="card">
@@ -939,6 +1078,65 @@ SCREENS.logic = function(){
     growByAccuracy('logic', L, correct, TOTAL);
     registerSession('logic', sc, {correct, total:TOTAL, secs, level:L});
     resultScreen('🤔 Logik-Schlüsse', correct, TOTAL, sc, secs, 'logic', '', levelInfo('logic', L));
+  }
+  render();
+};
+
+/* ---------------- Modul 7: Datenanalyse ---------------- */
+SCREENS.table = function(){
+  const TOTAL=8, ZEIT=60;                    // Sekunden je Aufgabe
+  const L=startLevel('table');
+  let idx=0, correct=0, startAll=Date.now();
+  sessionShell('table');
+  let cur, answered=false, frageNr=0;
+
+  function render(){
+    const meine = ++frageNr;     // eigene Kennung: der Wecker darf nur die eigene Aufgabe treffen
+    setHud(`${idx+1}/${TOTAL} · Lvl ${L}`);
+    cur=genTable(L); answered=false;
+    document.getElementById('body').innerHTML=`
+      <div class="tzeit"><i id="tbar"></i></div>
+      <div class="tcap">${cur.titel}</div>
+      <div class="tscroll"><table class="dtab">
+        <tr><th>${cur.zeilenLabel}</th>${cur.kopf.map(k=>`<th>${k}</th>`).join('')}</tr>
+        ${cur.zeilen.map(z=>`<tr><td>${z.label}</td>${z.werte.map(v=>`<td>${num(v)}</td>`).join('')}</tr>`).join('')}
+      </table></div>
+      <p class="tfrage">${cur.frage}</p>
+      <div class="answers">${cur.opts.map(o=>`<button class="ans" data-v="${o}">${num(o)}</button>`).join('')}</div>
+      <div class="feedback" id="fb"></div>`;
+    document.querySelectorAll('.ans').forEach(b=>b.onclick=()=>choose(b));
+    /* Zeitbalken rein über CSS-Übergang, dazu genau ein abgesicherter Zeitgeber für den
+       Ablauf – kein Intervall, das beim Bildschirmwechsel aufgeräumt werden müsste. */
+    const bar=document.getElementById('tbar');
+    requestAnimationFrame(()=>{ bar.style.transition=`width ${ZEIT}s linear`; bar.style.width='0%'; });
+    laterIfActive(()=>{ if(meine===frageNr && !answered) choose(null); }, ZEIT*1000);
+  }
+
+  function choose(btn){
+    if(answered) return; answered=true;
+    const bar=document.getElementById('tbar');
+    if(bar){ bar.style.transition='none'; bar.style.width=getComputedStyle(bar).width; }
+    const ok = btn && Math.abs(+btn.dataset.v - cur.ans) < 1e-9;
+    if(ok){ btn.classList.add('correct'); correct++; fxCorrect(); }
+    else{
+      if(btn) btn.classList.add('wrong');
+      fxWrong();
+      document.querySelectorAll('.ans').forEach(b=>{
+        if(Math.abs(+b.dataset.v - cur.ans) < 1e-9) b.classList.add('correct');
+      });
+    }
+    document.getElementById('fb').textContent =
+      ok ? '✔ Richtig' : (btn ? '✗ ' : '⏱ Zeit abgelaufen – ') + cur.erklaerung;
+    idx++;
+    laterIfActive(()=> idx<TOTAL ? render() : finish(), ok ? 900 : 2600);
+  }
+
+  function finish(){
+    const secs=Math.round((Date.now()-startAll)/1000);
+    const sc=Math.max(0, correct*20);        // kein Zeitabzug: das Zeitlimit steckt schon in der Aufgabe
+    growByAccuracy('table', L, correct, TOTAL);
+    registerSession('table', sc, {correct, total:TOTAL, secs, level:L});
+    resultScreen('📊 Datenanalyse', correct, TOTAL, sc, secs, 'table', '', levelInfo('table', L));
   }
   render();
 };

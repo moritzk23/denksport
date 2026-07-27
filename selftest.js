@@ -244,6 +244,69 @@
     return {ok:dev<=0.15, info:'Verteilung '+counts.join(' / ')+', max. Abweichung '+pct(dev)};
   });
 
+  /* ---------- genTable(): Zahlen aus Tabellen ---------- */
+  /* Die Lösung wird unabhängig aus den angezeigten Tabellenwerten nachgerechnet – also aus
+     genau dem, was der Spieler sieht, nicht aus Zwischenwerten des Generators. */
+  check('genTable: Lösung stimmt mit den Tabellenwerten überein', ()=>{
+    let bad=0; const arten={};
+    for(const L of LEVELS) for(let t=0;t<400;t++){
+      const g=genTable(L);
+      arten[g.kind]=(arten[g.kind]||0)+1;
+      // betrachtete Spalte aus der Frage bestimmen
+      const spIdx = g.kopf.findIndex(k=>g.frage.includes(k));
+      if(spIdx<0){ bad++; continue; }
+      const wert = name => { const z=g.zeilen.find(z=>z.label===name); return z ? z.werte[spIdx] : null; };
+      const genannt = g.zeilen.filter(z=>g.frage.includes(z.label)).map(z=>z.label);
+      const summe = g.zeilen.reduce((s,z)=>s+z.werte[spIdx],0);
+      let soll=null;
+      if(g.kind==='anteil'  && genannt.length>=1) soll=Math.round(wert(genannt[0])/summe*100);
+      else if(g.kind==='differenz' && genannt.length===2){
+        const [a,b]=genannt.map(wert); soll=Math.abs(a-b);
+      }else if(g.kind==='veraenderung' && genannt.length===2){
+        // Frage lautet "... liegt X über Y": X ist der höhere Wert, Y die Bezugsgröße
+        const m=g.frage.match(/liegt (.+?) über (.+?) in/);
+        if(m){ const neu=wert(m[1]), alt=wert(m[2]); soll=Math.round((neu-alt)/alt*100); }
+      }else if(g.kind==='verhaeltnis' && genannt.length===2){
+        const m=g.frage.match(/so groß ist (.+?) wie (.+?) in/);
+        if(m) soll=Math.round(wert(m[1])/wert(m[2])*10)/10;
+      }else if(g.kind==='prozentVon' && genannt.length>=1){
+        const m=g.frage.match(/von ([\d,]+) % auf (.+?) in/);
+        if(m) soll=Math.round(wert(m[2])*(+m[1].replace(',','.'))/100*100)/100;
+      }
+      if(soll===null || Math.abs(soll-g.ans)>0.011) bad++;
+    }
+    const namen=Object.entries(arten).map(([k,v])=>k+' '+pct(v/(LEVELS.length*400))).join(', ');
+    return {ok:bad===0, info:bad===0?('4000 Aufgaben nachgerechnet – '+namen):bad+' falsche Lösungen'};
+  });
+  check('genTable: vier verschiedene Optionen, richtige enthalten, alle positiv', ()=>{
+    let bad=0;
+    for(const L of LEVELS) for(let t=0;t<400;t++){
+      const g=genTable(L);
+      const k=g.opts.map(o=>o.toFixed(2));
+      if(g.opts.length!==4 || new Set(k).size!==4) bad++;
+      else if(!g.opts.some(o=>Math.abs(o-g.ans)<1e-9)) bad++;
+      else if(g.opts.some(o=>!Number.isFinite(o) || o<=0)) bad++;
+    }
+    return {ok:bad===0, info:bad===0?'4000 Aufgaben sauber':bad+' fehlerhaft'};
+  });
+  check('genTable: Aufgabenarten erscheinen ab ihrem Level', ()=>{
+    const arten = lv => { const s=new Set(); for(let t=0;t<800;t++) s.add(genTable(lv).kind); return s; };
+    const l1=arten(1), l4=arten(4), l8=arten(8);
+    const ok = !l1.has('veraenderung') && !l1.has('verhaeltnis') && !l1.has('prozentVon')
+            &&  l4.has('veraenderung') && !l4.has('verhaeltnis')
+            &&  l8.has('verhaeltnis')  &&  l8.has('prozentVon');
+    return {ok, info:'Level 1: '+[...l1].join('/')+' · Level 4: '+[...l4].join('/')+' · Level 8: '+[...l8].join('/')};
+  });
+  check('genTable: Position der richtigen Option gleichverteilt', ()=>{
+    const counts=[0,0,0,0];
+    for(let t=0;t<4000;t++){
+      const g=genTable(6);
+      counts[g.opts.findIndex(o=>Math.abs(o-g.ans)<1e-9)]++;
+    }
+    const dev=uniformity(counts);
+    return {ok:dev<=0.15, info:'Verteilung '+counts.join(' / ')+', max. Abweichung '+pct(dev)};
+  });
+
   /* ---------- genBayes(): bedingte Wahrscheinlichkeit ---------- */
   check('genBayes: Prozentwert stimmt mit den genannten Häufigkeiten überein', ()=>{
     let bad=0;
