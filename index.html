@@ -91,6 +91,8 @@
   .levelbar{height:6px; background:var(--card2); border-radius:99px; overflow:hidden; margin-top:12px;}
   .levelbar > i{display:block; height:100%; background:var(--acc); width:0;}
   .levellbl{font-size:11px; color:var(--muted); margin-top:5px;}
+  .revtag{display:inline-block; font-size:11px; font-weight:700; letter-spacing:.4px;
+          color:var(--acc); border:1px solid var(--acc); border-radius:999px; padding:3px 10px; margin-bottom:-6px;}
   .confetti-cvs{position:fixed; inset:0; pointer-events:none; z-index:9999;}
   .micon{color:var(--acc); line-height:0;}
   .shead{display:flex; align-items:center; gap:9px;}
@@ -117,6 +119,7 @@
   .fcombo{height:24px; text-align:center; font-weight:800; color:var(--acc); font-size:16px; opacity:0; transition:opacity .2s;}
   .fcombo.show{opacity:1;}
   .prompt.small{font-size:30px;}
+  .prompt.text{font-size:22px; line-height:1.45; font-weight:700; margin:20px 0;}
   .floatxp{position:fixed; transform:translate(-50%,0); color:var(--good); font-weight:800; font-size:20px;
            pointer-events:none; z-index:9998; transition:transform .7s ease-out, opacity .7s; opacity:1;}
   .floatxp.go{transform:translate(-50%,-46px); opacity:0;}
@@ -190,6 +193,46 @@ function todayStr(d=new Date()){
   return new Date(d.getTime() - d.getTimezoneOffset()*60000).toISOString().slice(0,10);
 }
 function persist(){ DB.save(state); }
+
+/* ---------------- Wiedervorlage falscher Aufgaben ----------------
+   Aufgaben, die nie wiederkehren, hinterlassen nichts – ohne Wiedervorlage wird
+   man in Endlosschleife geprüft statt trainiert. Nur beim Kopfrechnen sinnvoll:
+   dort hat eine Aufgabe eine Identität (7 × 8 bleibt 7 × 8), bei Matrix und
+   Zahlenreihen wäre "dieselbe Aufgabe" bloß eine zufällige Wiederholung. */
+const REVIEW_STEPS = [1, 3, 7];      // Tage bis zur nächsten Vorlage
+function reviewList(mod){
+  state.review = state.review || {};
+  return (state.review[mod] = state.review[mod] || []);
+}
+function addDays(dayStr, n){
+  const d = new Date(dayStr+'T12:00:00');          // Mittag umgeht Zeitzonen-Kanten
+  d.setDate(d.getDate()+n);
+  return todayStr(d);
+}
+function reviewDue(mod){
+  const t = todayStr();
+  return reviewList(mod).filter(r => r.due <= t);
+}
+/* Falsch beantwortet: neu aufnehmen bzw. auf Anfang zurücksetzen */
+function reviewMiss(mod, item){
+  const list = reviewList(mod);
+  const ex = list.find(r => r.q === item.q);
+  if(ex){ ex.step = 0; ex.due = addDays(todayStr(), REVIEW_STEPS[0]); }
+  else list.push({q:item.q, ans:item.ans, cls:item.cls||'', step:0, due:addDays(todayStr(), REVIEW_STEPS[0])});
+  if(list.length > 150) list.shift();
+  persist();
+}
+/* Richtig beantwortet: nächste Stufe, nach der letzten gilt sie als gemeistert */
+function reviewHit(mod, q){
+  const list = reviewList(mod);
+  const i = list.findIndex(r => r.q === q);
+  if(i < 0) return;
+  const r = list[i];
+  r.step++;
+  if(r.step >= REVIEW_STEPS.length) list.splice(i,1);
+  else r.due = addDays(todayStr(), REVIEW_STEPS[r.step]);
+  persist();
+}
 
 /* ---------------- Themes & Icons ---------------- */
 const THEMES = { graphit:'Graphit', papier:'Papier', tinte:'Tinte', sepia:'Sepia' };
@@ -345,7 +388,25 @@ function mulFactors(lv){
   if(lv<=8) return [rnd(11,29),  rnd(2,9)];         // zweistellig × einstellig
   return       [rnd(11,29),  rnd(11,19)];           // zweistellig × zweistellig
 }
+/* Prozent und Dreisatz kommen mit steigendem Level dazu. Beides zahlt im Alltag
+   unmittelbar zurück – anders als reines Ziffernrechnen, das nur sich selbst trainiert. */
+function genPercent(lv){
+  const p = 5*rnd(1,lv<7?10:19);                 // Vielfaches von 5
+  const base = 20*rnd(1, lv<7?10:20);            // Vielfaches von 20 -> Ergebnis ganzzahlig
+  return {q:`${p} % von ${base}`, ans:p*base/100, kind:'percent', cls:'small'};
+}
+function genDreisatz(lv){
+  const unit = rnd(2, lv<8?12:25);               // Preis je Stück
+  const a = rnd(2,9), c = rnd(2,12);
+  return {q:`${a} Stück kosten ${a*unit} €.<br>Was kosten ${c} Stück?`,
+          ans:c*unit, kind:'dreisatz', cls:'text'};
+}
 function genMath(lv){
+  const extra = [];
+  if(lv>=4) extra.push(genPercent);
+  if(lv>=6) extra.push(genDreisatz);
+  if(extra.length && Math.random()>=0.55) return pick(extra)(lv);
+
   const ops = lv<2 ? ['+','-'] : lv<4 ? ['+','-','×'] : ['+','-','×','÷'];
   const op = ops[Math.floor(Math.random()*ops.length)];
   const max = 8 + lv*10;
@@ -355,7 +416,7 @@ function genMath(lv){
   else if(op==='×'){ [a,b]=mulFactors(lv); ans=a*b; q=`${a} × ${b}`; }
   else { let [x,y]=mulFactors(lv); if(y>12) y=rnd(3,12);   // Teiler bleibt handhabbar
          ans=x; b=y; a=x*y; q=`${a} ÷ ${b}`; }
-  return {q, ans};
+  return {q, ans, kind:'arith', cls:''};
 }
 /* Weite Wertebereiche sind hier kein Selbstzweck: Der Aufgabenvorrat ist Start × Parameter.
    Zu enge Bereiche machen die Reihen nach wenigen Sessions wiedererkennbar statt denkbar. */
@@ -589,32 +650,41 @@ SCREENS.math = function(){
   let idx=0, correct=0, level=L0, startAll=Date.now();
   sessionShell('math');
 
-  let current, answered=false;
+  let current, answered=false, isReview=false, reviewDone=0;
   function render(){
+    /* Fällige Wiederholungen zuerst, aber höchstens jede zweite Aufgabe –
+       eine Session soll nicht nur aus alten Fehlern bestehen. */
+    const due = reviewDue('math');
+    isReview = due.length>0 && reviewDone < Math.ceil(TOTAL/2) && Math.random()<0.6;
+    current = isReview ? pick(due) : genMath(level);
+    if(isReview) reviewDone++;
+    answered=false;
     setHud(`${idx+1}/${TOTAL} · Level ${level}`);
-    current = genMath(level); answered=false;
     const opts = distractors(current.ans);
     document.getElementById('body').innerHTML = `
-      <div class="prompt">${current.q}</div>
+      ${isReview?'<div class="revtag">Wiederholung</div>':''}
+      <div class="prompt ${current.cls||''}">${current.q}</div>
       <div class="answers">
         ${opts.map(o=>`<button class="ans" data-v="${o}">${o}</button>`).join('')}
       </div>
       <div class="feedback" id="fb"></div>
       <div class="bar"><i style="width:${idx/TOTAL*100}%"></i></div>
     `;
-    document.querySelectorAll('.ans').forEach(b=>b.onclick=()=>pick(b));
+    document.querySelectorAll('.ans').forEach(b=>b.onclick=()=>choose(b));
   }
-  function pick(btn){
+  function choose(btn){        // heißt bewusst nicht pick(): das würde den globalen Zufalls-Helfer verdecken
     if(answered) return; answered=true;
     const v = +btn.dataset.v;
     if(v===current.ans){
       btn.classList.add('correct'); correct++; level++; fxCorrect();
       document.getElementById('fb').textContent='✔ Richtig';
+      if(isReview) reviewHit('math', current.q);
     }else{
       btn.classList.add('wrong'); fxWrong();
       document.querySelectorAll('.ans').forEach(b=>{ if(+b.dataset.v===current.ans) b.classList.add('correct'); });
       level = Math.max(1, level-1);
       document.getElementById('fb').textContent='✗ Falsch: '+current.ans;
+      reviewMiss('math', current);
     }
     idx++;
     setTimeout(()=>{ idx<TOTAL ? render() : finish(); }, 650);
@@ -897,14 +967,14 @@ SCREENS.flow = function(){
       answered=false;
       const L=lvlForCombo();
       curType = pick(['math','seq','logic','matrix']);
-      if(curType==='math'){ cur=genMath(L); renderChoice(cur.q, cur.ans, distractors(cur.ans)); }
-      else if(curType==='seq'){ cur=genSeq(L); renderChoice(cur.arr.join('  ·  ')+'  ·  ?', cur.next, distractors(cur.next), true); }
+      if(curType==='math'){ cur=genMath(L); renderChoice(cur.q, cur.ans, distractors(cur.ans), cur.cls); }
+      else if(curType==='seq'){ cur=genSeq(L); renderChoice(cur.arr.join('  ·  ')+'  ·  ?', cur.next, distractors(cur.next), 'small'); }
       else if(curType==='logic'){ cur=genLogic(L); renderLogic(cur); }
       else { cur=genMatrix(L); renderMatrix(cur); }
     }
-    function renderChoice(promptText, ans, opts, small){
+    function renderChoice(promptText, ans, opts, cls){
       body().innerHTML = `
-        <div class="prompt ${small?'small':''}">${promptText}</div>
+        <div class="prompt ${cls||''}">${promptText}</div>
         <div class="answers">${opts.map(o=>`<button class="ans" data-v="${o}">${o}</button>`).join('')}</div>
         <div class="feedback" id="fb"></div>`;
       document.querySelectorAll('.ans').forEach(b=>b.onclick=()=>judge(+b.dataset.v===ans, b));

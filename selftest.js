@@ -37,21 +37,42 @@
 
   /* ---------- genMath(): Rechenergebnis stimmt wirklich ---------- */
   check('genMath: Aufgabentext und Ergebnis stimmen überein', ()=>{
-    let bad=0, seen=new Set();
+    let bad=0; const arten={};
     for(const L of LEVELS) for(let t=0;t<800;t++){
-      const {q,ans}=genMath(L);
-      const m=q.match(/^(\d+) (.) (\d+)$/);
-      if(!m){ bad++; continue; }
-      const a=+m[1], op=m[2], b=+m[3]; seen.add(op);
-      let exp;
-      if(op==='+') exp=a+b;
-      else if(op==='−') exp=a-b;
-      else if(op==='×') exp=a*b;
-      else if(op==='÷') exp=(a%b===0)?a/b:NaN;
-      else { bad++; continue; }
+      const {q,ans,kind}=genMath(L);
+      arten[kind]=(arten[kind]||0)+1;
+      let exp, m;
+      if(kind==='arith'){
+        m=q.match(/^(\d+) (.) (\d+)$/);
+        if(!m){ bad++; continue; }
+        const a=+m[1], op=m[2], b=+m[3];
+        if(op==='+') exp=a+b;
+        else if(op==='−') exp=a-b;
+        else if(op==='×') exp=a*b;
+        else if(op==='÷') exp=(a%b===0)?a/b:NaN;
+        else { bad++; continue; }
+      }else if(kind==='percent'){
+        m=q.match(/^(\d+) % von (\d+)$/);
+        if(!m){ bad++; continue; }
+        exp=+m[1]*+m[2]/100;
+      }else if(kind==='dreisatz'){
+        m=q.match(/^(\d+) Stück kosten (\d+) €\.<br>Was kosten (\d+) Stück\?$/);
+        if(!m){ bad++; continue; }
+        const a=+m[1], b=+m[2], c=+m[3];
+        exp=(b%a===0) ? b/a*c : NaN;
+      }else{ bad++; continue; }
       if(exp!==ans || !Number.isInteger(ans) || ans<0) bad++;
     }
-    return {ok:bad===0, info:bad===0?('8000 Aufgaben korrekt, Operatoren: '+[...seen].join(' ')):bad+' falsche Ergebnisse'};
+    const namen=Object.entries(arten).map(([k,v])=>k+' '+pct(v/8000)).join(', ');
+    return {ok:bad===0, info:bad===0?('8000 Aufgaben korrekt – '+namen):bad+' falsche Ergebnisse'};
+  });
+  check('genMath: Prozent und Dreisatz erscheinen ab ihrem Level', ()=>{
+    const kinds = lv => { const s=new Set(); for(let t=0;t<600;t++) s.add(genMath(lv).kind); return s; };
+    const l2=kinds(2), l5=kinds(5), l8=kinds(8);
+    const ok = !l2.has('percent') && !l2.has('dreisatz')
+            &&  l5.has('percent') && !l5.has('dreisatz')
+            &&  l8.has('percent') &&  l8.has('dreisatz');
+    return {ok, info:'Level 2: '+[...l2].join('/')+' · Level 5: '+[...l5].join('/')+' · Level 8: '+[...l8].join('/')};
   });
 
   check('genMath: Schwierigkeit wächst bis Level 10 spürbar', ()=>{
