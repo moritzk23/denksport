@@ -82,7 +82,8 @@
   .center{text-align:center;}
   .muted{color:var(--muted);}
   .big-num{font-size:56px; font-weight:800;}
-  .feedback{height:22px; font-weight:700; text-align:center; margin-top:6px;}
+  .feedback{min-height:22px; font-weight:700; text-align:center; margin-top:8px;
+            font-size:14px; line-height:1.45; padding:0 4px;}
   .chartrow{display:flex; align-items:flex-end; gap:6px; height:120px; margin-top:8px;}
   .chartrow > div{flex:1; background:var(--acc); border-radius:6px 6px 0 0; min-height:3px;}
   .chartlbl{display:flex; gap:6px; margin-top:4px;}
@@ -91,6 +92,7 @@
   .levelbar{height:6px; background:var(--card2); border-radius:99px; overflow:hidden; margin-top:12px;}
   .levelbar > i{display:block; height:100%; background:var(--acc); width:0;}
   .levellbl{font-size:11px; color:var(--muted); margin-top:5px;}
+  .card.note{background:none; border-style:dashed; color:var(--muted);}
   .revtag{display:inline-block; font-size:11px; font-weight:700; letter-spacing:.4px;
           color:var(--acc); border:1px solid var(--acc); border-radius:999px; padding:3px 10px; margin-bottom:-6px;}
   .confetti-cvs{position:fixed; inset:0; pointer-events:none; z-index:9999;}
@@ -199,7 +201,10 @@ function persist(){ DB.save(state); }
    man in Endlosschleife geprüft statt trainiert. Nur beim Kopfrechnen sinnvoll:
    dort hat eine Aufgabe eine Identität (7 × 8 bleibt 7 × 8), bei Matrix und
    Zahlenreihen wäre "dieselbe Aufgabe" bloß eine zufällige Wiederholung. */
-const REVIEW_STEPS = [1, 3, 7];      // Tage bis zur nächsten Vorlage
+/* Wachsende Abstände in Tagen. Der günstige Abstand liegt bei 10–20 % der Zeit, über die
+   man etwas behalten will; wer monatelang sicher rechnen will, braucht daher auch Abstände
+   von Wochen. Expandierende Leitern schlagen gleichbleibende. */
+const REVIEW_STEPS = [1, 3, 7, 21, 60];
 function reviewList(mod){
   state.review = state.review || {};
   return (state.review[mod] = state.review[mod] || []);
@@ -218,7 +223,8 @@ function reviewMiss(mod, item){
   const list = reviewList(mod);
   const ex = list.find(r => r.q === item.q);
   if(ex){ ex.step = 0; ex.due = addDays(todayStr(), REVIEW_STEPS[0]); }
-  else list.push({q:item.q, ans:item.ans, cls:item.cls||'', step:0, due:addDays(todayStr(), REVIEW_STEPS[0])});
+  else list.push({q:item.q, ans:item.ans, cls:item.cls||'', hinweis:item.hinweis||'',
+                  step:0, due:addDays(todayStr(), REVIEW_STEPS[0])});
   if(list.length > 150) list.shift();
   persist();
 }
@@ -258,21 +264,35 @@ function svgIcon(name, size){
   return `<svg class="ic" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICONS[name]||''}</svg>`;
 }
 
-/* Start-Schwierigkeit (1..10) für ein Modul – aus Level oder fester Stufe */
+/* Start-Schwierigkeit (1..10) für ein Modul – aus Level oder fester Stufe.
+   Intern wird das Level mit Nachkommastellen geführt, gespielt wird die gerundete Stufe. */
 function startLevel(mod){
-  if(state.mode==='grow') return Math.max(1, Math.min(MAXLVL, state.level[mod]||1));
+  if(state.mode==='grow') return Math.max(1, Math.min(MAXLVL, Math.round(state.level[mod]||1)));
   return DIFF_FIXED[state.mode] || 3;
 }
+function shownLevel(mod){ return Math.round(state.level[mod]||1); }
 /* Level speichern – nur im 'grow'-Modus, geklemmt auf 1..10 */
 function saveLevel(mod, lvl){
   if(state.mode!=='grow') return;
-  state.level[mod] = Math.max(1, Math.min(MAXLVL, Math.round(lvl)));
+  state.level[mod] = Math.max(1, Math.min(MAXLVL, lvl));
   persist();
 }
-/* Level am Session-Ende anhand der Trefferquote anpassen (nicht-fortlaufende Module) */
+/* Schwierigkeit auf eine Zieltrefferquote von 85 % einregeln – dem empirisch
+   günstigsten Wert fürs Lernen (Wilson et al. 2019).
+
+   Statt fester Schwellen ("hoch ab 90 %") wird proportional zur Abweichung nachgeführt.
+   Feste Schwellen träfen den Zielwert nicht: Bei 10 Aufgaben ist die Quote in Zehnteln
+   gequantelt, und die Module haben unterschiedlich viele Aufgaben (8 bis über 20) –
+   der Gleichgewichtspunkt hinge damit an der Aufgabenzahl. Hier ist er per Konstruktion
+   genau dort, wo die erwartete Quote 85 % beträgt, weil die Anpassung dann im Mittel
+   null ist. Das Level wird intern mit Nachkommastellen geführt und pendelt sich
+   zwischen zwei Stufen ein. */
+const ACC_TARGET = 0.85, ACC_GAIN = 3;
 function growByAccuracy(mod, lvl, correct, total){
-  const acc = total ? correct/total : 0;
-  saveLevel(mod, lvl + (acc>=0.8 ? 1 : acc<0.5 ? -1 : 0));
+  if(!total) return;
+  const acc = correct/total;
+  const basis = (state.mode==='grow' && typeof state.level[mod]==='number') ? state.level[mod] : lvl;
+  saveLevel(mod, basis + ACC_GAIN*(acc - ACC_TARGET));
 }
 
 /* stats: {correct, total, secs, level} bzw. {span} bei Zahlen merken.
@@ -362,7 +382,7 @@ function confetti(){
 }
 
 /* Level-Info fürs Ergebnis (nur im 'grow'-Modus) */
-function levelInfo(mod, from){ return state.mode==='grow' ? {from, to: state.level[mod]||from} : null; }
+function levelInfo(mod, from){ return state.mode==='grow' ? {from, to: shownLevel(mod)} : null; }
 
 /* ---------------- Module-Definitionen ---------------- */
 const MODULES = {
@@ -371,7 +391,7 @@ const MODULES = {
   memory:{icon:'memory', name:'Zahlen merken', desc:'Merke dir immer längere Ziffernfolgen'},
   logic: {icon:'logic',  name:'Logik-Schlüsse',desc:'Wahr oder falsch? Logisch schließen'},
   matrix:{icon:'matrix', name:'Muster-Matrix', desc:'Erkenne die Regel im 3×3-Raster'},
-  nback: {icon:'nback',  name:'N-Back',        desc:'Arbeitsgedächtnis: Treffer erkennen'},
+  nback: {icon:'nback',  name:'N-Back',        desc:'Konzentration über eine Folge halten'},
 };
 
 /* ---------------- Aufgaben-Generatoren (von Modulen & Flow genutzt) ---------------- */
@@ -393,13 +413,15 @@ function mulFactors(lv){
 function genPercent(lv){
   const p = 5*rnd(1,lv<7?10:19);                 // Vielfaches von 5
   const base = 20*rnd(1, lv<7?10:20);            // Vielfaches von 20 -> Ergebnis ganzzahlig
-  return {q:`${p} % von ${base}`, ans:p*base/100, kind:'percent', cls:'small'};
+  return {q:`${p} % von ${base}`, ans:p*base/100, kind:'percent', cls:'small',
+          hinweis:`10 % von ${base} sind ${base/10} – also sind ${p} % davon ${p*base/100}.`};
 }
 function genDreisatz(lv){
   const unit = rnd(2, lv<8?12:25);               // Preis je Stück
   const a = rnd(2,9), c = rnd(2,12);
   return {q:`${a} Stück kosten ${a*unit} €.<br>Was kosten ${c} Stück?`,
-          ans:c*unit, kind:'dreisatz', cls:'text'};
+          ans:c*unit, kind:'dreisatz', cls:'text',
+          hinweis:`Ein Stück kostet ${a*unit} ÷ ${a} = ${unit} €, also kosten ${c} Stück ${c*unit} €.`};
 }
 function genMath(lv){
   const extra = [];
@@ -444,8 +466,19 @@ function genLogic(L){
   const useMore=Math.random()<0.5;
   const truth=(useMore===(i<j));
   const concl=`${n[i]} ist ${useMore?rel.m:rel.l} als ${n[j]}.`;
-  // premPairs/conclPair nur für den Selbsttest – die Oberfläche nutzt nur prem/concl
-  return {prem, concl, truth, premPairs:shown, conclPair:[n[i], n[j]], conclMore:useMore};
+  // premPairs/conclPair für Selbsttest und für die Erklärung nach einer falschen Antwort
+  return {kind:'transitiv', prem, concl, truth, premPairs:shown,
+          conclPair:[n[i], n[j]], conclMore:useMore, rel};
+}
+/* Rangfolge aus den Prämissen rekonstruieren: vom Kopf der Kette aus durchhangeln.
+   Wird für die Erklärung nach einer falschen Antwort gebraucht (und im Selbsttest). */
+function rankOrder(pairs){
+  const next=new Map(), all=new Set(), lower=new Set();
+  for(const [a,b] of pairs){ next.set(a,b); all.add(a); all.add(b); lower.add(b); }
+  let cur=[...all].find(x=>!lower.has(x));
+  const o=[];
+  while(cur!==undefined && !o.includes(cur)){ o.push(cur); cur=next.get(cur); }
+  return o.length===all.size ? o : null;
 }
 /* Form liegt auf der einen Achse, Anzahl auf der anderen: die Zeile verrät nur die
    Form, die Spalte nur die Anzahl – eine einzelne Zeile/Spalte reicht nie aus. */
@@ -486,6 +519,45 @@ function matrixHtml(m){
 function matrixIsCorrect(m, btn){ return m.opts[+btn.dataset.i]===m.answer; }
 function matrixMarkAnswer(m){
   document.querySelectorAll('.mopt').forEach(b=>{ if(m.opts[+b.dataset.i]===m.answer) b.classList.add('correct'); });
+}
+
+/* Bedingte Wahrscheinlichkeit in natürlichen Häufigkeiten ("9 von 108") statt in Prozent.
+   Genau diese Darstellung macht die Aufgabe lösbar und hält an: In Trainingsstudien lagen
+   die Trefferquoten nach fünf Wochen noch bei rund 90 %, während Regeltraining auf etwa
+   20 % zurückfiel. Die Antwortoptionen enthalten bewusst die üblichen Denkfallen. */
+const BAYES_STORIES=[
+  {ganz:'Personen',  merkmal:'die Krankheit', ohne:'Gesunden',      pruef:'schlägt der Test bei', pruef2:'schlägt er fälschlich bei', treffer:'positiv Getesteten', ist:'wirklich krank'},
+  {ganz:'E-Mails',   merkmal:'Spam',          ohne:'normalen',      pruef:'markiert der Filter',  pruef2:'markiert er fälschlich',   treffer:'markierten E-Mails', ist:'wirklich Spam'},
+  {ganz:'Bauteile',  merkmal:'einen Defekt',  ohne:'einwandfreien', pruef:'erkennt die Prüfung',  pruef2:'schlägt sie fälschlich bei', treffer:'aussortierten Teile', ist:'wirklich defekt'}
+];
+function genBayes(L){
+  const N = 1000;
+  const betroffen = L<=3 ? 100 : L<=6 ? 50 : L<=8 ? 20 : 10;   // seltener = kontraintuitiver
+  const rest = N - betroffen;
+  const sens = pick([0.8, 0.9]);
+  const fpr  = pick([0.05, 0.1]);
+  const treffer = Math.round(betroffen*sens);
+  const fehlalarm = Math.round(rest*fpr);
+  const positiv = treffer + fehlalarm;
+  const ans = Math.round(treffer/positiv*100);
+
+  const s = pick(BAYES_STORIES);
+  const lines = [
+    `Von ${N} ${s.ganz} haben ${betroffen} ${s.merkmal}.`,
+    `Von diesen ${betroffen} ${s.pruef} ${treffer} an.`,
+    `Von den ${rest} ${s.ohne} ${s.pruef2} ${fehlalarm}.`
+  ];
+  const frage = `Wie viel Prozent der ${s.treffer} sind ${s.ist}?`;
+
+  /* Denkfallen in dieser Reihenfolge: Trefferquote der Prüfung (häufigster Fehler),
+     Grundrate, dann neutrale Füller – bis vier verschiedene Optionen zusammenkommen. */
+  const opts=new Set([ans]);
+  for(const t of [Math.round(sens*100), Math.round(betroffen/N*100), 50, 33, 75, 25, 95, 2, 66]){
+    if(opts.size>=4) break;
+    if(t!==ans) opts.add(t);
+  }
+  return {kind:'bayes', lines, frage, ans, opts:shuffle([...opts]),
+          erklaerung:`${treffer} von ${positiv} ${s.treffer} sind ${s.ist} – das sind ${ans} %.`};
 }
 
 /* N-Back-Folge mit Lockvögeln: Wiederholungen im Abstand N-1 bzw. N+1, die KEINE Treffer sind.
@@ -543,7 +615,15 @@ function gainXP(amount){
 
 /* ---------------- Router / Screens ---------------- */
 const app = document.getElementById('app');
-function go(screen){ SCREENS[screen](); window.scrollTo(0,0); }
+let screenEpoch = 0;
+function go(screen){ screenEpoch++; SCREENS[screen](); window.scrollTo(0,0); }
+/* Zeitgeber, der nur feuert, wenn noch derselbe Bildschirm offen ist. Ohne diese Prüfung
+   malt ein Modul, das man während der Rückmeldepause verlässt, seine nächste Aufgabe in
+   den inzwischen geöffneten Bildschirm. */
+function laterIfActive(fn, ms){
+  const e = screenEpoch;
+  return setTimeout(()=>{ if(e===screenEpoch) fn(); }, ms);
+}
 
 const SCREENS = {};
 
@@ -586,8 +666,8 @@ SCREENS.home = function(){
           <div class="name">${m.name}</div>
           <div class="desc">${m.desc}</div>
           ${state.mode==='grow'
-            ? `<div class="levelbar" title="Level ${state.level[k]||1} von ${MAXLVL}"><i style="width:${(state.level[k]||1)/MAXLVL*100}%"></i></div>
-               <div class="levellbl">Level ${state.level[k]||1}</div>`
+            ? `<div class="levelbar" title="Level ${shownLevel(k)} von ${MAXLVL}"><i style="width:${shownLevel(k)/MAXLVL*100}%"></i></div>
+               <div class="levellbl">Level ${shownLevel(k)}</div>`
             : `<div class="levellbl">${DIFF_LABEL[state.mode]}</div>`}
         </div>`).join('')}
     </div>
@@ -646,8 +726,12 @@ function setHud(txt){ const h=document.getElementById('hud'); if(h) h.textConten
 /* ---------------- Modul 1: Kopfrechnen ---------------- */
 SCREENS.math = function(){
   const TOTAL = 10;
+  /* Das Level bleibt während der Session fest. Stiege es nach jeder richtigen Antwort,
+     wäre das eine 1-hoch/1-runter-Treppe – die pendelt sich bei 50 % Trefferquote ein,
+     weit unter dem günstigen Bereich. Angepasst wird erst am Ende, über die Trefferquote.
+     Nebeneffekt: Bei fester Schwierigkeit ist die Quote über Sessions vergleichbar. */
   const L0=startLevel('math');
-  let idx=0, correct=0, level=L0, startAll=Date.now();
+  let idx=0, correct=0, startAll=Date.now();
   sessionShell('math');
 
   let current, answered=false, isReview=false, reviewDone=0;
@@ -656,10 +740,10 @@ SCREENS.math = function(){
        eine Session soll nicht nur aus alten Fehlern bestehen. */
     const due = reviewDue('math');
     isReview = due.length>0 && reviewDone < Math.ceil(TOTAL/2) && Math.random()<0.6;
-    current = isReview ? pick(due) : genMath(level);
+    current = isReview ? pick(due) : genMath(L0);
     if(isReview) reviewDone++;
     answered=false;
-    setHud(`${idx+1}/${TOTAL} · Level ${level}`);
+    setHud(`${idx+1}/${TOTAL} · Level ${L0}`);
     const opts = distractors(current.ans);
     document.getElementById('body').innerHTML = `
       ${isReview?'<div class="revtag">Wiederholung</div>':''}
@@ -674,27 +758,30 @@ SCREENS.math = function(){
   }
   function choose(btn){        // heißt bewusst nicht pick(): das würde den globalen Zufalls-Helfer verdecken
     if(answered) return; answered=true;
+    let erklaert=false;        // längere Pause, wenn ein Rechenweg zu lesen ist
     const v = +btn.dataset.v;
     if(v===current.ans){
-      btn.classList.add('correct'); correct++; level++; fxCorrect();
+      btn.classList.add('correct'); correct++; fxCorrect();
       document.getElementById('fb').textContent='✔ Richtig';
       if(isReview) reviewHit('math', current.q);
     }else{
       btn.classList.add('wrong'); fxWrong();
       document.querySelectorAll('.ans').forEach(b=>{ if(+b.dataset.v===current.ans) b.classList.add('correct'); });
-      level = Math.max(1, level-1);
-      document.getElementById('fb').textContent='✗ Falsch: '+current.ans;
+      // Bei Prozent und Dreisatz den Rechenweg zeigen, nicht nur die Lösung
+      document.getElementById('fb').textContent = current.hinweis ? '✗ '+current.hinweis
+                                                                 : '✗ Falsch: '+current.ans;
+      erklaert = !!current.hinweis;
       reviewMiss('math', current);
     }
     idx++;
-    setTimeout(()=>{ idx<TOTAL ? render() : finish(); }, 650);
+    laterIfActive(()=>{ idx<TOTAL ? render() : finish(); }, erklaert ? 2600 : 650);
   }
   function finish(){
     const secs = Math.round((Date.now()-startAll)/1000);
-    const score = correct*10 + Math.max(0, level*5) - secs;
+    const score = correct*10 + Math.max(0, L0*5) - secs;   // Zeitabzug bleibt: siehe Kommentar in SCREENS.seq
     const sc = Math.max(0, score);
-    saveLevel('math', level);
-    registerSession('math', sc, {correct, total:TOTAL, secs, level});
+    growByAccuracy('math', L0, correct, TOTAL);
+    registerSession('math', sc, {correct, total:TOTAL, secs, level:L0});
     resultScreen('🧮 Kopfrechnen', correct, TOTAL, sc, secs, 'math', '', levelInfo('math', L0));
   }
   render();
@@ -702,14 +789,14 @@ SCREENS.math = function(){
 
 /* ---------------- Modul 2: Zahlenreihen ---------------- */
 SCREENS.seq = function(){
-  const TOTAL=8; const L0=startLevel('seq');
-  let idx=0, correct=0, level=L0, startAll=Date.now();
+  const TOTAL=8; const L0=startLevel('seq');   // Level bleibt fest, siehe Kommentar in SCREENS.math
+  let idx=0, correct=0, startAll=Date.now();
   sessionShell('seq');
 
   let current, answered=false;
   function render(){
-    setHud(`${idx+1}/${TOTAL} · Level ${level}`);
-    current=genSeq(level); answered=false;
+    setHud(`${idx+1}/${TOTAL} · Level ${L0}`);
+    current=genSeq(L0); answered=false;
     const opts = distractors(current.next);
     document.getElementById('body').innerHTML=`
       <p class="muted center">Welche Zahl setzt die Reihe fort?</p>
@@ -717,19 +804,21 @@ SCREENS.seq = function(){
       <div class="answers">${opts.map(o=>`<button class="ans" data-v="${o}">${o}</button>`).join('')}</div>
       <div class="feedback" id="fb"></div>
     `;
-    document.querySelectorAll('.ans').forEach(b=>b.onclick=()=>pick(b));
+    document.querySelectorAll('.ans').forEach(b=>b.onclick=()=>choose(b));
   }
-  function pick(btn){
+  function choose(btn){        // nicht pick(): das würde den globalen Zufalls-Helfer verdecken
     if(answered)return; answered=true;
-    if(+btn.dataset.v===current.next){ btn.classList.add('correct'); correct++; level++; fxCorrect(); document.getElementById('fb').textContent='✔ Richtig'; }
-    else{ btn.classList.add('wrong'); fxWrong(); document.querySelectorAll('.ans').forEach(b=>{if(+b.dataset.v===current.next)b.classList.add('correct');}); level=Math.max(1,level-1); document.getElementById('fb').textContent='Richtig wäre: '+current.next; }
-    idx++; setTimeout(()=> idx<TOTAL?render():finish(), 800);
+    if(+btn.dataset.v===current.next){ btn.classList.add('correct'); correct++; fxCorrect(); document.getElementById('fb').textContent='✔ Richtig'; }
+    else{ btn.classList.add('wrong'); fxWrong(); document.querySelectorAll('.ans').forEach(b=>{if(+b.dataset.v===current.next)b.classList.add('correct');}); document.getElementById('fb').textContent='Richtig wäre: '+current.next; }
+    idx++; laterIfActive(()=> idx<TOTAL?render():finish(), 800);
   }
   function finish(){
+    /* Kein Zeitabzug: Tempodruck beschleunigt zwar beim Rechnen den Wechsel vom Ausrechnen
+       zum Abrufen (dort erwünscht), beim Schlussfolgern fördert er dagegen nur Raten. */
     const secs=Math.round((Date.now()-startAll)/1000);
-    const sc=Math.max(0, correct*15 + level*4 - Math.floor(secs/2));
-    saveLevel('seq', level);
-    registerSession('seq', sc, {correct, total:TOTAL, secs, level});
+    const sc=Math.max(0, correct*15 + L0*4);
+    growByAccuracy('seq', L0, correct, TOTAL);
+    registerSession('seq', sc, {correct, total:TOTAL, secs, level:L0});
     resultScreen('🔢 Zahlenreihen', correct, TOTAL, sc, secs, 'seq', '', levelInfo('seq', L0));
   }
   render();
@@ -748,7 +837,7 @@ SCREENS.memory = function(){
     const digits = Array.from({length:level}, ()=>rnd(0,9)).join('');
     body.innerHTML = `<p class="muted center">Merke dir die Zahl…</p><div class="big-num center" id="show">${digits}</div>`;
     const showMs = 700 + level*350;
-    setTimeout(()=>askInput(digits), showMs);
+    laterIfActive(()=>askInput(digits), showMs);
   }
   function askInput(digits){
     let entered='';
@@ -775,7 +864,7 @@ SCREENS.memory = function(){
     if(entered===digits){
       best=Math.max(best,level); level++; fxCorrect();
       document.getElementById('fb').textContent='✔ Richtig!';
-      setTimeout(newRound, 700);
+      laterIfActive(newRound, 700);
     }else{
       lives--; fxWrong();
       document.getElementById('fb').textContent='✗ Falsch – war '+digits;
@@ -783,8 +872,8 @@ SCREENS.memory = function(){
         const sc=best*20 + (round-1)*3;
         saveLevel('memory', Math.max(D0, best-2));   // Level wächst mit erreichter Länge
         registerSession('memory', sc, {span:best});
-        setTimeout(()=>resultScreen('🧠 Zahlen merken', best, best, sc, 0, 'memory', `Beste Länge: ${best} Ziffern`, levelInfo('memory', D0)), 900);
-      }else setTimeout(newRound, 900);
+        laterIfActive(()=>resultScreen('🧠 Zahlen merken', best, best, sc, 0, 'memory', `Beste Länge: ${best} Ziffern`, levelInfo('memory', D0)), 900);
+      }else laterIfActive(newRound, 900);
     }
   }
   newRound();
@@ -798,8 +887,16 @@ SCREENS.logic = function(){
   let cur, answered=false;
   function render(){
     setHud(`${idx+1}/${TOTAL} · Lvl ${L}`);
-    cur=genLogic(L); answered=false;
-    document.getElementById('body').innerHTML=`
+    /* Ab Level 2 mischen sich Aufgaben zur bedingten Wahrscheinlichkeit dazu.
+       Bewusst nicht im Flow-Modus: Sie brauchen Bedenkzeit, kein Tempo. */
+    cur = (L>=2 && Math.random()<0.35) ? genBayes(L) : genLogic(L);
+    answered=false;
+    document.getElementById('body').innerHTML = cur.kind==='bayes' ? `
+      <p class="muted">Angenommen, das Folgende stimmt:</p>
+      ${cur.lines.map(p=>`<div class="premise">${p}</div>`).join('')}
+      <p class="muted center" style="margin-top:14px;">${cur.frage}</p>
+      <div class="answers">${cur.opts.map(o=>`<button class="ans" data-v="${o}">${o} %</button>`).join('')}</div>
+      <div class="feedback" id="fb"></div>` : `
       <p class="muted">Angenommen, das Folgende stimmt:</p>
       ${cur.prem.map(p=>`<div class="premise">${p}</div>`).join('')}
       <p class="muted center" style="margin-top:14px;">Folgt daraus zwingend:</p>
@@ -809,18 +906,36 @@ SCREENS.logic = function(){
         <button class="f" data-v="false">FALSCH</button>
       </div>
       <div class="feedback" id="fb"></div>`;
-    document.querySelectorAll('.tf button').forEach(b=>b.onclick=()=>choose(b));
+    document.querySelectorAll(cur.kind==='bayes' ? '.ans' : '.tf button')
+      .forEach(b=>b.onclick=()=>choose(b));
   }
   function choose(btn){
     if(answered)return; answered=true;
-    const ok = (btn.dataset.v==='true')===cur.truth;
-    if(ok){ correct++; fxCorrect(); document.getElementById('fb').textContent='✔ Richtig'; }
-    else { fxWrong(); document.getElementById('fb').textContent='✗ Richtig wäre: '+(cur.truth?'WAHR':'FALSCH'); }
-    idx++; setTimeout(()=> idx<TOTAL?render():finish(), 950);
+    const ok = cur.kind==='bayes'
+      ? +btn.dataset.v===cur.ans
+      : (btn.dataset.v==='true')===cur.truth;
+    const fb=document.getElementById('fb');
+    if(ok){
+      correct++; fxCorrect();
+      if(cur.kind==='bayes') btn.classList.add('correct');
+      fb.textContent='✔ Richtig';
+    }else{
+      fxWrong();
+      if(cur.kind==='bayes'){
+        btn.classList.add('wrong');
+        document.querySelectorAll('.ans').forEach(b=>{ if(+b.dataset.v===cur.ans) b.classList.add('correct'); });
+        fb.textContent='✗ '+cur.erklaerung;                   // Rechenweg statt nur der Lösung
+      }else{
+        const o=rankOrder(cur.premPairs);                     // hergeleitete Rangfolge zeigen
+        fb.textContent = o ? `✗ Reihenfolge: ${o.join(' → ')}`
+                           : '✗ Richtig wäre: '+(cur.truth?'WAHR':'FALSCH');
+      }
+    }
+    idx++; laterIfActive(()=> idx<TOTAL?render():finish(), cur.kind==='bayes'||!ok ? 2200 : 950);
   }
   function finish(){
     const secs=Math.round((Date.now()-startAll)/1000);
-    const sc=Math.max(0, correct*18 - Math.floor(secs/3));
+    const sc=Math.max(0, correct*18);          // kein Zeitabzug beim Schlussfolgern
     growByAccuracy('logic', L, correct, TOTAL);
     registerSession('logic', sc, {correct, total:TOTAL, secs, level:L});
     resultScreen('🤔 Logik-Schlüsse', correct, TOTAL, sc, secs, 'logic', '', levelInfo('logic', L));
@@ -848,11 +963,11 @@ SCREENS.matrix = function(){
     if(matrixIsCorrect(cur, btn)){ btn.classList.add('correct'); correct++; fxCorrect(); document.getElementById('fb').textContent='✔ Richtig'; }
     else { btn.classList.add('wrong'); fxWrong(); matrixMarkAnswer(cur);
       document.getElementById('fb').textContent='✗ Form aus der Zeile, Anzahl aus der Spalte'; }
-    idx++; setTimeout(()=> idx<TOTAL?render():finish(), 1000);
+    idx++; laterIfActive(()=> idx<TOTAL?render():finish(), 1000);
   }
   function finish(){
     const secs=Math.round((Date.now()-startAll)/1000);
-    const sc=Math.max(0, correct*16 - Math.floor(secs/3));
+    const sc=Math.max(0, correct*16);          // kein Zeitabzug beim Mustererkennen
     growByAccuracy('matrix', L, correct, TOTAL);
     registerSession('matrix', sc, {correct, total:TOTAL, secs, level:L});
     resultScreen('🧩 Muster-Matrix', correct, TOTAL, sc, secs, 'matrix', '', levelInfo('matrix', L));
@@ -871,6 +986,10 @@ SCREENS.nback = function(){
     <div class="card">
       <p style="font-size:16px; line-height:1.5; margin:0 0 8px;">Es erscheinen nacheinander Buchstaben. Tippe <b>„Treffer"</b>, wenn der aktuelle Buchstabe <b>derselbe ist wie ${N} ${N===1?'Schritt':'Schritte'} vorher</b> (${N}-Back).</p>
       <p class="muted" style="font-size:14px; margin:0;">Vergleiche jeden Buchstaben mit dem, der ${N} ${N===1?'Position':'Positionen'} vorher kam.</p>
+    </div>
+    <div class="spacer"></div>
+    <div class="card note">
+      <p style="margin:0; font-size:13px; line-height:1.5;">Zur Einordnung: N-Back verbessert belegbar N-Back und ähnliche Merkaufgaben. Dass davon die allgemeine Denkfähigkeit profitiert, ist in Übersichtsarbeiten <b>nicht</b> belegt. Nimm es als Konzentrationsübung, nicht als Intelligenztraining.</p>
     </div>
     <div class="spacer"></div>
     <button class="btn" id="startnb">Los geht's (${N}-Back)</button>`;
@@ -895,9 +1014,9 @@ SCREENS.nback = function(){
       pressed=false; hitBtn.classList.remove('flash');
       letterEl.textContent = seq[i];
       letterEl.classList.remove('pop'); void letterEl.offsetWidth; letterEl.classList.add('pop');
-      setTimeout(()=>{
+      laterIfActive(()=>{
         letterEl.textContent='';                   // Buchstabe aus -> Pause
-        setTimeout(()=>{                           // Antwortfenster endet mit der Pause
+        laterIfActive(()=>{                        // Antwortfenster endet mit der Pause
           if(i>=N){ const t=(seq[i]===seq[i-N]); if(t){ pressed?hits++:misses++; } else if(pressed){ fa++; } }
           i++; if(i>=LEN) finish(); else step();
         }, GAP);
@@ -905,8 +1024,12 @@ SCREENS.nback = function(){
     }
     function finish(){
       const sc=Math.max(0, hits*18 - fa*10 - misses*4);
-      growByAccuracy('nback', L, hits, targets);
-      registerSession('nback', sc, {correct:hits, total:targets, level:L});
+      /* Quote über ALLE bewerteten Durchgänge, nicht nur über die Treffer: Sonst erreicht
+         100 %, wer stur bei jedem Buchstaben tippt – Fehlalarme blieben unsichtbar. */
+      const bewertet = LEN - N;
+      const richtig  = hits + (bewertet - targets - fa);
+      growByAccuracy('nback', L, richtig, bewertet);
+      registerSession('nback', sc, {correct:richtig, total:bewertet, level:L});
       resultScreen('🎯 N-Back', hits, targets, sc, 0, 'nback', `${N}-Back · Fehlalarme: ${fa} · Verpasst: ${misses}`, levelInfo('nback', L));
     }
     step();
@@ -1008,12 +1131,12 @@ SCREENS.flow = function(){
         if(btn) btn.classList.add('correct');
         if(combo%5===0){ Sound.levelup(); toast(`${combo}× Combo!`); }
         updateTop();
-        setTimeout(next, 340);
+        laterIfActive(next, 340);
       }else{
         combo=0; lives--; fxWrong();
         if(btn) btn.classList.add('wrong');
         markCorrect(); updateTop();
-        setTimeout(()=> lives<=0 ? end() : next(), 780);
+        laterIfActive(()=> lives<=0 ? end() : next(), 780);
       }
     }
     function end(){
@@ -1199,7 +1322,8 @@ function distractors(correct){
 /* Start */
 applyTheme();
 if(new URLSearchParams(location.search).has('selftest')){
-  const s=document.createElement('script'); s.src='./selftest.js'; document.body.appendChild(s);
+  // Zeitstempel erzwingt die aktuelle Fassung – sonst prüft man unbemerkt eine alte Testdatei
+  const s=document.createElement('script'); s.src='./selftest.js?v='+Date.now(); document.body.appendChild(s);
 }else{
   go('home');
 }

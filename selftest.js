@@ -244,6 +244,105 @@
     return {ok:dev<=0.15, info:'Verteilung '+counts.join(' / ')+', max. Abweichung '+pct(dev)};
   });
 
+  /* ---------- genBayes(): bedingte Wahrscheinlichkeit ---------- */
+  check('genBayes: Prozentwert stimmt mit den genannten Häufigkeiten überein', ()=>{
+    let bad=0;
+    for(const L of LEVELS) for(let t=0;t<300;t++){
+      const b=genBayes(L);
+      // Zahlen aus dem Aufgabentext zurücklesen und unabhängig nachrechnen
+      const m1=b.lines[0].match(/Von (\d+) .+ haben (\d+)/);
+      const m2=b.lines[1].match(/^Von diesen \d+ .+? (\d+)\D*$/);
+      const m3=b.lines[2].match(/^Von den (\d+) .+? (\d+)\.$/);
+      if(!m1||!m2||!m3){ bad++; continue; }
+      const treffer=+m2[1], fehlalarm=+m3[2];
+      const soll=Math.round(treffer/(treffer+fehlalarm)*100);
+      if(soll!==b.ans) bad++;
+    }
+    return {ok:bad===0, info:bad===0?'3000 Aufgaben korrekt gerechnet':bad+' falsche Prozentwerte'};
+  });
+  check('genBayes: vier verschiedene Optionen, richtige enthalten', ()=>{
+    let bad=0;
+    for(const L of LEVELS) for(let t=0;t<300;t++){
+      const b=genBayes(L);
+      if(b.opts.length!==4 || new Set(b.opts).size!==4 || !b.opts.includes(b.ans)) bad++;
+    }
+    return {ok:bad===0, info:bad===0?'3000 Aufgaben sauber':bad+' fehlerhaft'};
+  });
+  check('genBayes: seltenere Fälle sind kontraintuitiver', ()=>{
+    const mittel = lv => {
+      let s=0; for(let t=0;t<400;t++) s+=genBayes(lv).ans;
+      return s/400;
+    };
+    const leicht=mittel(1), schwer=mittel(10);
+    return {ok: schwer < leicht-10,
+            info:'mittlerer richtiger Anteil – Level 1: '+leicht.toFixed(0)+' %, Level 10: '+schwer.toFixed(0)+' %'};
+  });
+  check('genBayes: Position der richtigen Option gleichverteilt', ()=>{
+    const counts=[0,0,0,0];
+    for(let t=0;t<4000;t++){ const b=genBayes(5); counts[b.opts.indexOf(b.ans)]++; }
+    const dev=uniformity(counts);
+    return {ok:dev<=0.15, info:'Verteilung '+counts.join(' / ')+', max. Abweichung '+pct(dev)};
+  });
+
+  /* ---------- Schwierigkeitssteuerung ---------- */
+  /* Der wichtigste Test dieser Datei: Er belegt, dass die Steuerung tatsächlich bei rund
+     85 % Trefferquote landet – dem empirisch günstigsten Wert. Dafür wird ein synthetischer
+     Lernender simuliert, dessen Trefferwahrscheinlichkeit vom Abstand zwischen Level und
+     Können abhängt. Vor der Umstellung pendelte sich das System bei etwa 50 % ein. */
+  check('Steuerung pendelt sich bei rund 85 % Trefferquote ein', ()=>{
+    /* Der echte Spielstand darf dabei nicht verändert werden: Zustand sichern,
+       „mitwachsend" erzwingen (sonst greift saveLevel gar nicht), am Ende zurücksetzen. */
+    const sicherung = JSON.stringify({mode:state.mode, level:state.level});
+    const mod='__sim';
+    let quoten=[];
+    try{
+      state.mode='grow';
+      for(const koennen of [3, 6, 9]){
+        state.level = {}; state.level[mod]=1;
+        const gemessen=[];
+        for(let session=0; session<400; session++){
+          const lvl=startLevel(mod);
+          // je weiter das Level über dem Können liegt, desto seltener sitzt die Antwort
+          const p=Math.max(0.02, Math.min(0.99, 1 - (lvl-koennen)*0.18));
+          let richtig=0; const total=10;
+          for(let i=0;i<total;i++) if(Math.random()<p) richtig++;
+          if(session>=200) gemessen.push(richtig/total);   // erste Hälfte einschwingen lassen
+          growByAccuracy(mod, lvl, richtig, total);
+        }
+        quoten.push(gemessen.reduce((a,b)=>a+b,0)/gemessen.length);
+      }
+    } finally {
+      const alt=JSON.parse(sicherung);
+      state.mode=alt.mode; state.level=alt.level; persist();
+    }
+    const ok=quoten.every(q=>Math.abs(q-0.85)<=0.06);
+    return {ok, info:'Gleichgewicht bei Können 3/6/9: '+quoten.map(pct).join(', ')+' (Ziel 85 %)'};
+  });
+
+  /* ---------- Bildschirmwechsel ---------- */
+  /* Wer während der Rückmeldepause das Modul wechselt, darf die nächste Aufgabe des alten
+     Moduls nicht im neuen Bildschirm sehen. Geprüft wird die Schutzfunktion selbst. */
+  check('laterIfActive: Zeitgeber nach Bildschirmwechsel feuert nicht mehr', ()=>{
+    const echterTimer = window.setTimeout;
+    let gefeuert = 0, abgelegt = null;
+    window.setTimeout = fn => { abgelegt = fn; return 0; };   // Rückruf abfangen statt warten
+    try{
+      laterIfActive(()=>gefeuert++, 500);
+      abgelegt();                                   // selber Bildschirm -> muss feuern
+      const beiGleichem = gefeuert;
+
+      laterIfActive(()=>gefeuert++, 500);
+      const spaeter = abgelegt;
+      screenEpoch++;                                // Bildschirmwechsel
+      spaeter();                                    // muss jetzt verworfen werden
+      const beiWechsel = gefeuert;
+
+      return {ok: beiGleichem===1 && beiWechsel===1,
+              info:`selber Bildschirm: ${beiGleichem===1?'feuert':'feuert nicht'} · `
+                  +`nach Wechsel: ${beiWechsel===1?'verworfen':'feuert fälschlich'}`};
+    } finally { window.setTimeout = echterTimer; }
+  });
+
   /* ---------- Ausgabe ---------- */
   const failed=results.filter(r=>!r.ok).length;
   document.getElementById('app').innerHTML = `

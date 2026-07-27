@@ -1,5 +1,5 @@
 /* Service Worker – macht die App offline lauffähig (Cache-first für die App-Hülle). */
-const CACHE = 'denksport-v12';
+const CACHE = 'denksport-v14';
 const ASSETS = [
   './',
   './index.html',
