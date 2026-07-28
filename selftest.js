@@ -428,6 +428,59 @@
     return {ok, info:'Gleichgewicht bei Können 3/6/9: '+quoten.map(pct).join(', ')+' (Ziel 85 %)'};
   });
 
+  /* ---------- Prüfungssimulation ---------- */
+  check('Prüfung: jede Aufgabe ist beantwortbar und eindeutig', ()=>{
+    let bad=0, n=0;
+    for(let lauf=0; lauf<200; lauf++){
+      for(const it of pruefungsAufgaben(18)){
+        n++;
+        const k=it.opts.map(o=>o.toFixed(3));
+        if(!it.opts || it.opts.length!==4 || new Set(k).size!==4) bad++;
+        else if(!it.opts.some(o=>Math.abs(o-it.ans)<1e-9)) bad++;
+        else if(!Number.isFinite(it.ans) || !it.kind || !it.g) bad++;
+      }
+    }
+    return {ok:bad===0, info:bad===0?(n+' Prüfungsaufgaben sauber'):bad+' fehlerhaft von '+n};
+  });
+  check('Prüfung: fester Schwierigkeitsgrad, unabhängig vom Trainingslevel', ()=>{
+    /* Der Sinn der festen Stufe ist Vergleichbarkeit: Zwei Läufe im Abstand von Wochen
+       dürfen sich nicht deshalb unterscheiden, weil das Trainingslevel gewandert ist. */
+    const sicherung = JSON.stringify({mode:state.mode, level:state.level});
+    const proTrainingslevel = {};
+    try{
+      for(const lvl of [1, 5, 10]){
+        state.mode='grow'; state.level={table:lvl, math:lvl};
+        const arten=new Set();
+        for(let t=0;t<400;t++) for(const it of pruefungsAufgaben(9)) arten.add(it.kind);
+        proTrainingslevel[lvl] = [...arten].sort().join(',');
+      }
+    } finally {
+      const alt=JSON.parse(sicherung); state.mode=alt.mode; state.level=alt.level; persist();
+    }
+    /* Stünde die Prüfung auf dem Trainingslevel, gäbe es bei Level 1 nur die einfachsten
+       Arten. Bei fester Stufe muss die Menge der Aufgabenarten überall gleich sein. */
+    const werte = Object.values(proTrainingslevel);
+    const gleich = werte.every(v=>v===werte[0]);
+    return {ok:gleich, info: gleich ? werte[0].split(',').length+' Aufgabenarten, identisch bei Trainingslevel 1, 5 und 10'
+                                    : 'weicht ab: '+JSON.stringify(proTrainingslevel)};
+  });
+  check('Prüfung: Mischung aus Tabellen und Rechnen stimmt', ()=>{
+    let tab=0, n=0; const arten=new Set();
+    for(let t=0;t<400;t++) for(const it of pruefungsAufgaben(18)){
+      n++; if(it.typ==='table') tab++; arten.add(it.kind);
+    }
+    const anteil=tab/n;
+    return {ok: anteil>0.5 && anteil<0.7 && arten.size>=8,
+            info:'Tabellenanteil '+pct(anteil)+', '+arten.size+' verschiedene Aufgabenarten'};
+  });
+  check('Prüfung: Formate haben die angekündigte Aufgabenzahl', ()=>{
+    const k=pruefungsAufgaben(PRUEF_FORMATE.kurz.n).length;
+    const l=pruefungsAufgaben(PRUEF_FORMATE.lang.n).length;
+    const okZeit = PRUEF_FORMATE.kurz.sek/PRUEF_FORMATE.kurz.n;
+    return {ok: k===18 && l===37 && Math.abs(okZeit-20)<1,
+            info:`Kurzform ${k} Aufgaben, Langform ${l}; ${okZeit.toFixed(0)} s je Aufgabe`};
+  });
+
   /* ---------- Bildschirmwechsel ---------- */
   /* Wer während der Rückmeldepause das Modul wechselt, darf die nächste Aufgabe des alten
      Moduls nicht im neuen Bildschirm sehen. Geprüft wird die Schutzfunktion selbst. */

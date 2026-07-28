@@ -102,6 +102,13 @@
   .dtab th:first-child,.dtab td:first-child{text-align:left;}
   .dtab th{font-size:11px; color:var(--muted); font-weight:600; text-transform:none;}
   .tfrage{font-size:16px; font-weight:700; line-height:1.4; margin:16px 0 12px;}
+  /* Prüfungssimulation */
+  .ptop{display:flex; align-items:center; gap:12px; margin:10px 0 8px;}
+  .pzeit{font-size:22px; font-weight:800; font-variant-numeric:tabular-nums;}
+  .pzeit.knapp{color:var(--bad);}
+  .ptop .muted{flex:1; font-size:13px;}
+  .pstart{display:flex; align-items:center; gap:12px; cursor:pointer;}
+  .pstart .micon{flex:none;}
   .card.note{background:none; border-style:dashed; color:var(--muted);}
   .revtag{display:inline-block; font-size:11px; font-weight:700; letter-spacing:.4px;
           color:var(--acc); border:1px solid var(--acc); border-radius:999px; padding:3px 10px; margin-bottom:-6px;}
@@ -271,7 +278,8 @@ const ICONS = {
   home:'<path d="M4 11l8-7 8 7"/><path d="M6 10v9a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-9"/>',
   flow:'<path d="M13 3L5 13h5l-1 8 8-11h-5l1-7z"/>',
   heart:'<path d="M12 20s-7-4.5-9.2-8.5C1.2 8.5 2.6 5 6 5c2 0 3.2 1.3 4 2.5C10.8 6.3 12 5 14 5c3.4 0 4.8 3.5 3.2 6.5C19 15.5 12 20 12 20z"/>',
-  table:'<rect x="3" y="4" width="18" height="16" rx="2"/><line x1="3" y1="9.5" x2="21" y2="9.5"/><line x1="10" y1="9.5" x2="10" y2="20"/>'
+  table:'<rect x="3" y="4" width="18" height="16" rx="2"/><line x1="3" y1="9.5" x2="21" y2="9.5"/><line x1="10" y1="9.5" x2="10" y2="20"/>',
+  exam:'<rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4h6v3H9z"/><line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="16" x2="13" y2="16"/>'
 };
 function svgIcon(name, size){
   return `<svg class="ic" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICONS[name]||''}</svg>`;
@@ -793,6 +801,40 @@ function genNBack(N, len){
   return {seq, targets, lures:lureCount, N};
 }
 
+/* ---------------- Prüfungssimulation ----------------
+   Nachbildung des Auswahlverfahrens: Gesamtzeit statt Zeit je Aufgabe, keine
+   Zwischenrückmeldung, danach Auswertung. Die Schwierigkeit ist bewusst FEST –
+   nur so sind zwei Läufe im Abstand von Wochen überhaupt vergleichbar. Das Ergebnis
+   fließt aus demselben Grund nicht in die adaptive Levelsteuerung ein: Es ist eine
+   Messung, kein Training. */
+const PRUEF_LEVEL = 8;
+const PRUEF_FORMATE = {
+  kurz: {n:18, sek:360, name:'Kurzform', text:'18 Aufgaben in 6 Minuten'},
+  lang: {n:37, sek:720, name:'Langform', text:'37 Aufgaben in 12 Minuten'}
+};
+const AUFGABEN_NAMEN = {
+  anteil:'Anteil an der Summe', differenz:'Differenz', veraenderung:'Prozentuale Veränderung',
+  verhaeltnis:'Verhältnis', prozentVon:'Prozent von einem Wert',
+  arith:'Grundrechenarten', percent:'Prozentrechnung', dreisatz:'Dreisatz',
+  bp_betrag:'Basispunkte → Betrag', betrag_bp:'Betrag → Basispunkte',
+  prozent_umkehr:'Prozentuale Umkehr', regel72:'72er-Regel', gewichtet:'Gewichtete Rendite'
+};
+/* Rund 60 % Tabellenaufgaben – das ist im echten Test das vorherrschende Format. */
+function pruefungsAufgaben(n){
+  const items=[];
+  for(let i=0;i<n;i++){
+    if(Math.random()<0.6){
+      const g=genTable(PRUEF_LEVEL);
+      items.push({typ:'table', kind:g.kind, g, ans:g.ans, opts:g.opts});
+    }else{
+      const g=genMath(PRUEF_LEVEL);
+      items.push({typ:'math', kind:g.kind, g, ans:g.ans, opts:g.opts||distractors(g.ans)});
+    }
+  }
+  return items;
+}
+function mmss(s){ return Math.floor(s/60)+':'+String(Math.max(0,s%60)).padStart(2,'0'); }
+
 /* ---------------- Spieler-XP & Level ---------------- */
 function playerLevel(xp){
   let lvl=1, need=120, acc=0;
@@ -865,7 +907,15 @@ SCREENS.home = function(){
                  <div class="levellbl">Level ${shownLevel(k)}</div>`
               : `<div class="levellbl">${DIFF_LABEL[state.mode]}</div>`}
           </div>`).join('')}
-      </div>`).join('')}
+      </div>
+      ${g==='finance'?`
+        <div class="card pstart" style="margin-top:12px;" onclick="go('pruefung')">
+          <span class="micon">${svgIcon('exam',26)}</span>
+          <div>
+            <div class="name" style="margin:0;">Prüfungssimulation</div>
+            <div class="desc">Unter Zeitdruck, ohne Rückmeldung – wie im Auswahlverfahren</div>
+          </div>
+        </div>`:''}`).join('')}
 
     <div class="spacer"></div>
     <div class="card">
@@ -1141,6 +1191,16 @@ SCREENS.logic = function(){
   render();
 };
 
+/* Tabelle samt Frage – von Datenanalyse und Prüfungssimulation gemeinsam genutzt */
+function tabelleHtml(g){
+  return `<div class="tcap">${g.titel}</div>
+    <div class="tscroll"><table class="dtab">
+      <tr><th>${g.zeilenLabel}</th>${g.kopf.map(k=>`<th>${k}</th>`).join('')}</tr>
+      ${g.zeilen.map(z=>`<tr><td>${z.label}</td>${z.werte.map(v=>`<td>${num(v)}</td>`).join('')}</tr>`).join('')}
+    </table></div>
+    <p class="tfrage">${g.frage}</p>`;
+}
+
 /* ---------------- Modul 7: Datenanalyse ---------------- */
 SCREENS.table = function(){
   const TOTAL=8, ZEIT=60;                    // Sekunden je Aufgabe
@@ -1155,12 +1215,7 @@ SCREENS.table = function(){
     cur=genTable(L); answered=false;
     document.getElementById('body').innerHTML=`
       <div class="tzeit"><i id="tbar"></i></div>
-      <div class="tcap">${cur.titel}</div>
-      <div class="tscroll"><table class="dtab">
-        <tr><th>${cur.zeilenLabel}</th>${cur.kopf.map(k=>`<th>${k}</th>`).join('')}</tr>
-        ${cur.zeilen.map(z=>`<tr><td>${z.label}</td>${z.werte.map(v=>`<td>${num(v)}</td>`).join('')}</tr>`).join('')}
-      </table></div>
-      <p class="tfrage">${cur.frage}</p>
+      ${tabelleHtml(cur)}
       <div class="answers">${cur.opts.map(o=>`<button class="ans" data-v="${o}">${num(o)}</button>`).join('')}</div>
       <div class="feedback" id="fb"></div>`;
     document.querySelectorAll('.ans').forEach(b=>b.onclick=()=>choose(b));
@@ -1425,6 +1480,133 @@ SCREENS.flow = function(){
   }
 };
 
+/* ---------------- Prüfungssimulation: Bildschirme ---------------- */
+SCREENS.pruefung = function(){
+  const laeufe = (state.exams||[]).slice(-4).reverse();
+  app.innerHTML = `
+    <div class="topbar"><button class="back" onclick="go('home')">‹ Zurück</button></div>
+    <h2 class="shead"><span class="hicon">${svgIcon('exam',22)}</span>Prüfungssimulation</h2>
+    <div class="card">
+      <p style="font-size:15px; line-height:1.5; margin:0 0 8px;">Nachbildung eines Auswahlverfahrens: <b>Gesamtzeit statt Zeit je Aufgabe</b>, keine Rückmeldung zwischendurch. Erst am Ende siehst du, wo du stehst.</p>
+      <p class="muted" style="font-size:13px; margin:0;">Die Schwierigkeit ist fest eingestellt, damit zwei Läufe im Abstand von Wochen vergleichbar bleiben. Das Ergebnis verändert deine Trainings-Level deshalb nicht.</p>
+    </div>
+    <div class="spacer"></div>
+    ${Object.entries(PRUEF_FORMATE).map(([k,f],i)=>
+      `<button class="btn ${i?'ghost':''}" data-f="${k}">${f.name} · ${f.text}</button><div class="spacer"></div>`).join('')}
+    ${laeufe.length?`
+      <div class="card">
+        <div style="font-weight:700; margin-bottom:8px;">Bisherige Läufe</div>
+        ${laeufe.map(l=>`<div style="display:flex; justify-content:space-between; font-size:13px; padding:5px 0; border-bottom:1px solid var(--line);">
+            <span class="muted">${l.day} · ${PRUEF_FORMATE[l.format]?PRUEF_FORMATE[l.format].name:l.format}</span>
+            <span><b>${Math.round(l.correct/l.total*100)} %</b> <span class="muted">(${l.correct}/${l.total})</span></span>
+          </div>`).join('')}
+      </div>`:''}
+    ${navBar('home')}`;
+  document.querySelectorAll('[data-f]').forEach(b=>b.onclick=()=>lauf(b.dataset.f));
+
+  function lauf(formatKey){
+    const f = PRUEF_FORMATE[formatKey];
+    const items = pruefungsAufgaben(f.n);
+    let i=0, richtig=0, rest=f.sek, beendet=false;
+    const proTyp = {};                       // Aufgabenart -> {richtig, gesamt}
+    const start = Date.now();
+
+    app.innerHTML = `
+      <div class="ptop">
+        <div class="pzeit" id="pzeit">${mmss(rest)}</div>
+        <div class="muted" id="pfort"></div>
+        <button class="back" style="padding:7px 11px;" id="pstop" aria-label="Abbrechen">✕</button>
+      </div>
+      <div class="tzeit"><i id="pbar" style="width:100%"></i></div>
+      <div id="pbody"></div>`;
+    document.getElementById('pstop').onclick = ()=>go('pruefung');
+    zeige(); ticke();
+
+    function ticke(){
+      if(beendet) return;
+      rest--;
+      const z=document.getElementById('pzeit'); if(!z) return;
+      z.textContent = mmss(rest);
+      z.classList.toggle('knapp', rest<=30);
+      document.getElementById('pbar').style.width = (rest/f.sek*100)+'%';
+      if(rest<=0) return fertig();
+      laterIfActive(ticke, 1000);
+    }
+    function zeige(){
+      const it = items[i];
+      document.getElementById('pfort').textContent = `${i+1} von ${f.n}`;
+      document.getElementById('pbody').innerHTML =
+        (it.typ==='table' ? tabelleHtml(it.g)
+                          : `<div class="prompt ${it.g.cls||''}">${it.g.q}</div>
+                             ${it.g.einheit?`<div class="einheit">Antwort in ${it.g.einheit}</div>`:''}`)
+        + `<div class="answers">${it.opts.map(o=>`<button class="ans" data-v="${o}">${num(o)}</button>`).join('')}</div>`;
+      document.querySelectorAll('.ans').forEach(b=>b.onclick=()=>antwort(+b.dataset.v));
+    }
+    function antwort(v){
+      const it = items[i];
+      const ok = Math.abs(v - it.ans) < 1e-9;
+      const p = proTyp[it.kind] = proTyp[it.kind] || {richtig:0, gesamt:0};
+      p.gesamt++; if(ok){ p.richtig++; richtig++; }
+      i++;
+      if(i>=f.n) return fertig();
+      zeige();                                   // ohne Rückmeldung direkt weiter
+    }
+    function fertig(){
+      if(beendet) return; beendet=true;
+      const secs = Math.min(f.sek, Math.round((Date.now()-start)/1000));
+      const eintrag = {day:todayStr(), format:formatKey, correct:richtig, total:f.n,
+                       bearbeitet:i, secs, proTyp};
+      state.exams = (state.exams||[]).concat([eintrag]);
+      if(state.exams.length>30) state.exams.shift();
+      /* Bewusst kein growByAccuracy: Die Prüfung misst, sie trainiert nicht.
+         registerSession zählt sie aber als Übungseinheit für Streak und XP. */
+      registerSession('pruefung', richtig*15, {correct:richtig, total:f.n, secs, level:PRUEF_LEVEL});
+      auswertung(eintrag);
+    }
+  }
+};
+
+function auswertung(e){
+  const quote = Math.round(e.correct/e.total*100);
+  const vorher = (state.exams||[]).filter(x=>x!==e && x.format===e.format).slice(-1)[0];
+  const delta = vorher ? quote - Math.round(vorher.correct/vorher.total*100) : null;
+  const zeilen = Object.entries(e.proTyp)
+    .map(([k,v])=>({name:AUFGABEN_NAMEN[k]||k, ...v, q:v.richtig/v.gesamt}))
+    .sort((a,b)=>a.q-b.q);                       // schwächste Art zuerst
+  app.innerHTML = `
+    <div class="center" style="padding-top:20px;">
+      <div class="ricon">${svgIcon('exam',48)}</div>
+      <h2>Prüfung ausgewertet</h2>
+      <div class="card" style="margin:16px 0;">
+        <div class="big-num">${quote} %</div>
+        <div class="muted">richtig (${e.correct} von ${e.total})</div>
+        ${delta!==null?`<div class="lvlchange ${delta>0?'up':delta<0?'down':'same'}">
+          ${delta>0?'+':''}${delta} Prozentpunkte gegenüber dem letzten Lauf</div>`:''}
+        <div class="spacer"></div>
+        <div class="row">
+          <div class="stat"><div class="big">${e.bearbeitet}</div><div class="lbl">bearbeitet</div></div>
+          <div class="stat"><div class="big">${mmss(e.secs)}</div><div class="lbl">gebraucht</div></div>
+          <div class="stat"><div class="big">${(e.secs/Math.max(1,e.bearbeitet)).toFixed(0)}s</div><div class="lbl">je Aufgabe</div></div>
+        </div>
+      </div>
+      <div class="card" style="text-align:left;">
+        <div style="font-weight:700; margin-bottom:8px;">Nach Aufgabenart</div>
+        ${zeilen.map(z=>`
+          <div style="margin-bottom:9px;">
+            <div style="display:flex; justify-content:space-between; font-size:13px;">
+              <span>${z.name}</span><span class="muted">${z.richtig}/${z.gesamt}</span>
+            </div>
+            <div class="bar" style="margin:4px 0 0;"><i style="width:${Math.round(z.q*100)}%"></i></div>
+          </div>`).join('')}
+        <p class="muted" style="font-size:12px; margin:10px 0 0;">Die schwächste Art steht oben – dort lohnt das Training am meisten.</p>
+      </div>
+      <div class="spacer"></div>
+      <button class="btn" onclick="go('pruefung')">Noch ein Lauf</button>
+      <div class="spacer"></div>
+      <button class="btn ghost" onclick="go('home')">Zur Startseite</button>
+    </div>`;
+}
+
 /* ---------------- Ergebnis-Screen ---------------- */
 function resultScreen(title, correct, total, score, secs, module, extra, lvl){
   const isNewBest = state.best[module]===score && score>0;
@@ -1495,8 +1677,9 @@ SCREENS.stats = function(){
     </div>
     <div class="spacer"></div>
     ${Object.entries(byModule).map(([k,v])=>{
-      const name = MODULES[k]?MODULES[k].name:(k==='flow'?'Flow':k);
-      const ic = MODULES[k]?MODULES[k].icon:(k==='flow'?'flow':'stats');
+      const sonder = {flow:['Flow','flow'], pruefung:['Prüfungssimulation','exam']};
+      const name = MODULES[k] ? MODULES[k].name : (sonder[k] ? sonder[k][0] : k);
+      const ic   = MODULES[k] ? MODULES[k].icon : (sonder[k] ? sonder[k][1] : 'stats');
       const bits = [v.n+(v.n===1?' Session':' Sessions')];
       if(v.accN) bits.push('⌀ '+Math.round(v.accSum/v.accN)+'% richtig');
       if(v.span) bits.push('max. '+v.span+' Ziffern');
